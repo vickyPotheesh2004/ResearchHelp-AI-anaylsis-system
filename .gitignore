@@ -1,0 +1,22 @@
+﻿# Virtual Environments
+venv/
+env/
+ENV/
+
+# API Keys and Secrets
+.env
+
+# Cache and Database files
+__pycache__/
+*.pyc
+.chroma/
+chroma.sqlite3
+*.db
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/

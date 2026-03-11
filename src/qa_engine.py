@@ -1,0 +1,363 @@
+﻿import os
+import logging
+import atexit
+import chromadb
+from dotenv import load_dotenv
+from concurrent.futures import ThreadPoolExecutor
+from rank_bm25 import BM25Okapi
+from src.topic_segmenter import TopicSegmenter
+from src.text_preprocessor import clean_text
+from src.intent_classifier import IntentClassifier
+from src.prompt_templates import get_prompt_for_intent
+from src.research_engine import ResearchEngine
+from src.config import CHROMA_DB_PATH, DEFAULT_LLM_MODEL, DEFAULT_TOP_K, THREAD_POOL_MAX_WORKERS, RETRIEVAL_TIMEOUT, CHAT_HISTORY_CONTEXT_SIZE, QA_MAX_TOKENS, QA_TEMPERATURE
+from src.llm_client import get_llm_client
+from src.logging_utils import get_logger
+
+load_dotenv()
+
+# Get logger - this ensures logging is configured
+logger = get_logger(__name__)
+
+class QAEngine:
+    def __init__(self):
+        llm_client = get_llm_client()
+        if not llm_client.is_available():
+            raise ValueError("OPENROUTER_API_KEY not found in environment variables.")
+        
+        self.client = llm_client.client
+        self.model = DEFAULT_LLM_MODEL
+
+        self.chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
+        self.collection = self.chroma_client.get_or_create_collection(name="active_session")
+        self.segmenter = TopicSegmenter()
+        self.intent_classifier = IntentClassifier()
+        self.research_engine = ResearchEngine()
+
+        self._bm25_corpus = []
+        self._bm25_docs = []
+        self._bm25_metas = []
+        self._bm25_index = None
+        self._available_topics = []
+        self._session_stats = {"questions_asked": 0, "topics_accessed": set(), "sources_used": set()}
+        self._executor = ThreadPoolExecutor(max_workers=THREAD_POOL_MAX_WORKERS)
+        
+        # Register cleanup handler
+        atexit.register(self._cleanup)
+    
+    def _cleanup(self):
+        """Clean up resources on application exit."""
+        if hasattr(self, '_executor') and self._executor is not None:
+            self._executor.shutdown(wait=True)
+            logger.info("ThreadPoolExecutor shutdown complete")
+
+    def ingest_and_segment(self, documents_dict, progress_callback=None):
+        try:
+            self.chroma_client.delete_collection(name="active_session")
+        except Exception:
+            pass
+
+        self.collection = self.chroma_client.create_collection(name="active_session")
+        self._bm25_corpus = []
+        self._bm25_docs = []
+        self._bm25_metas = []
+        self._available_topics = []
+        self._session_stats = {"questions_asked": 0, "topics_accessed": set(), "sources_used": set()}
+
+        for filename, raw_content in documents_dict.items():
+            cleaned_content = clean_text(raw_content)
+            topics = self.segmenter.segment(cleaned_content)
+
+            for i, topic_data in enumerate(topics):
+                doc_id = f"{filename}_{topic_data['topic_id']}"
+                meta = {"source_file": filename, "topic": topic_data["title"]}
+
+                self.collection.add(
+                    documents=[topic_data["content"]],
+                    metadatas=[meta],
+                    ids=[doc_id]
+                )
+
+                self._bm25_corpus.append(topic_data["content"].lower().split())
+                self._bm25_docs.append(topic_data["content"])
+                self._bm25_metas.append(meta)
+                self._available_topics.append(topic_data["title"])
+
+                if progress_callback:
+                    progress_callback(filename, i + 1, len(topics), topic_data["title"])
+
+        if self._bm25_corpus:
+            self._bm25_index = BM25Okapi(self._bm25_corpus)
+
+    def _hybrid_retrieve(self, query: str, n_results: int = DEFAULT_TOP_K) -> list:
+        """
+        Perform hybrid retrieval combining semantic (ChromaDB) and keyword (BM25) search.
+        Weights: 70% semantic, 30% BM25
+        """
+        logger.info(f"Starting hybrid retrieval for query: {query[:50]}...")
+        
+        semantic_results = self.collection.query(query_texts=[query], n_results=n_results)
+        # Defensive null checks to prevent KeyError
+        semantic_docs = semantic_results.get('documents', [[]])[0] if semantic_results.get('documents') else []
+        semantic_metas = semantic_results.get('metadatas', [[]])[0] if semantic_results.get('metadatas') else []
+        semantic_distances = semantic_results.get('distances', [[]])[0] if semantic_results.get('distances') else []
+
+        logger.info(f"Semantic search returned {len(semantic_docs)} results")
+
+        seen = set()
+        combined = []
+
+        for doc, meta, dist in zip(semantic_docs, semantic_metas, semantic_distances):
+            key = doc[:100]
+            if key not in seen:
+                seen.add(key)
+                relevance = max(0, 1 - dist) if dist else 0.5
+                combined.append({"doc": doc, "meta": meta, "score": relevance * 0.7})
+
+        if self._bm25_index:
+            tokenized_query = query.lower().split()
+            bm25_scores = self._bm25_index.get_scores(tokenized_query)
+            max_bm25 = max(bm25_scores) if max(bm25_scores) > 0 else 1
+            top_bm25_indices = sorted(range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True)[:n_results]
+
+            logger.info(f"BM25 search returned {sum(1 for s in bm25_scores if s > 0)} non-zero scores")
+
+            for idx in top_bm25_indices:
+                if bm25_scores[idx] > 0:
+                    key = self._bm25_docs[idx][:100]
+                    norm_score = (bm25_scores[idx] / max_bm25) * 0.3
+                    if key not in seen:
+                        seen.add(key)
+                        combined.append({
+                            "doc": self._bm25_docs[idx],
+                            "meta": self._bm25_metas[idx],
+                            "score": norm_score
+                        })
+                    else:
+                        for item in combined:
+                            if item["doc"][:100] == key:
+                                item["score"] += norm_score
+                                break
+
+        combined.sort(key=lambda x: x["score"], reverse=True)
+        return combined[:n_results]
+
+    def get_all_chunks(self):
+        try:
+            all_data = self.collection.get()
+            return all_data.get("documents", []), all_data.get("metadatas", [])
+        except Exception:
+            return [], []
+
+    def get_session_stats(self):
+        return {
+            "questions_asked": self._session_stats["questions_asked"],
+            "topics_accessed": len(self._session_stats["topics_accessed"]),
+            "sources_used": len(self._session_stats["sources_used"]),
+            "total_topics": len(self._available_topics),
+        }
+
+    def get_available_topics(self):
+        return list(set(self._available_topics))
+
+    def _classify_intent(self, question):
+        return self.intent_classifier.classify(question, self._available_topics)
+
+    def _retrieve_context(self, question):
+        chunks, metas = self.get_all_chunks()
+        result = []
+        for doc, meta in zip(chunks, metas):
+            result.append({"doc": doc, "meta": meta, "score": 1.0})
+        return result
+
+    def get_answer_stream(self, question, chat_history, metadata=None):
+        intent_future = self._executor.submit(self._classify_intent, question)
+        retrieval_future = self._executor.submit(self._retrieve_context, question)
+
+        try:
+            intent_result = intent_future.result(timeout=RETRIEVAL_TIMEOUT)
+        except Exception:
+            intent_result = {"intent": "document_qa", "emoji": "📄", "label": "Document Q&A"}
+            
+        try:
+            retrieved = retrieval_future.result(timeout=RETRIEVAL_TIMEOUT)
+        except Exception:
+            retrieved = []
+            
+        intent = intent_result["intent"]
+
+        self._session_stats["questions_asked"] += 1
+
+        source_citations = []
+        context_blocks = []
+        for item in retrieved:
+            self._session_stats["topics_accessed"].add(item["meta"].get("topic", ""))
+            self._session_stats["sources_used"].add(item["meta"].get("source_file", ""))
+            context_blocks.append(f"SOURCE: {item['meta']['source_file']} | TOPIC: {item['meta']['topic']}\n{item['doc']}")
+            source_citations.append({
+                "file": item["meta"]["source_file"],
+                "topic": item["meta"]["topic"],
+                "score": round(item["score"], 3),
+                "preview": item["doc"][:200] + "..."
+            })
+        context = "\n\n".join(context_blocks)
+
+        from src.prompt_templates import DOMAIN_PROMPTS
+        detected_domains = []
+        combined_text = f"{question} {context}".lower()
+        for domain in DOMAIN_PROMPTS.keys():
+            if domain.lower() in combined_text:
+                detected_domains.append(domain)
+
+        system_prompt = get_prompt_for_intent(intent, detected_domains=detected_domains)
+        
+        # Inject metadata if it's the IEEE intent
+        if intent == "ieee_paper_gen" and metadata:
+            meta_str = json.dumps(metadata, indent=2)
+            system_prompt = system_prompt.replace("{metadata}", meta_str)
+        elif "{metadata}" in system_prompt:
+            system_prompt = system_prompt.replace("{metadata}", "N/A - Information not provided by user.")
+
+        messages = [{"role": "system", "content": f"{system_prompt}\n\nDOCUMENT CONTEXT:\n{context}"}]
+
+        for msg in chat_history[-CHAT_HISTORY_CONTEXT_SIZE:]:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+
+        messages.append({"role": "user", "content": question})
+
+        try:
+            stream = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=QA_MAX_TOKENS,
+                temperature=QA_TEMPERATURE,
+                stream=True
+            )
+
+            yield {"type": "meta", "intent": intent_result, "sources": source_citations[:5]}
+
+            full_content = ""
+            for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
+                    token = chunk.choices[0].delta.content
+                    full_content += token
+                    yield {"type": "token", "token": token}
+
+            if "<think>" in full_content and "</think>" in full_content:
+                start = full_content.find("<think>") + 7
+                end = full_content.find("</think>")
+                reasoning = full_content[start:end].strip()
+                content = full_content[end + 8:].strip()
+                yield {"type": "done", "content": content, "reasoning": reasoning}
+            else:
+                yield {"type": "done", "content": full_content, "reasoning": None}
+
+        except Exception as e:
+            yield {"type": "meta", "intent": intent_result, "sources": []}
+            yield {"type": "done", "content": f"API Error: {str(e)}", "reasoning": None}
+
+    def get_answer(self, question, chat_history, metadata=None):
+        """
+        Get answer for a question using RAG pipeline.
+        Includes error handling with logging for intent classification and retrieval.
+        """
+        logger.info(f"Processing question: {question[:50]}...")
+        
+        intent_future = self._executor.submit(self._classify_intent, question)
+        retrieval_future = self._executor.submit(self._retrieve_context, question)
+
+        try:
+            intent_result = intent_future.result(timeout=RETRIEVAL_TIMEOUT)
+            logger.info(f"Intent classified: {intent_result.get('intent', 'unknown')}")
+        except TimeoutError as e:
+            logger.warning(f"Intent classification timed out: {e}. Using fallback.")
+            intent_result = {"intent": "document_qa", "emoji": "📄", "label": "Document Q&A"}
+        except Exception as e:
+            logger.error(f"Intent classification failed: {e}. Using fallback.")
+            intent_result = {"intent": "document_qa", "emoji": "📄", "label": "Document Q&A"}
+            
+        try:
+            retrieved = retrieval_future.result(timeout=RETRIEVAL_TIMEOUT)
+            logger.info(f"Retrieval completed: {len(retrieved)} chunks retrieved")
+        except TimeoutError as e:
+            logger.warning(f"Context retrieval timed out: {e}. Using empty context.")
+            retrieved = []
+        except Exception as e:
+            logger.error(f"Context retrieval failed: {e}. Using empty context.")
+            retrieved = []
+            
+        intent = intent_result["intent"]
+
+        self._session_stats["questions_asked"] += 1
+
+        source_citations = []
+        context_blocks = []
+        for item in retrieved:
+            self._session_stats["topics_accessed"].add(item["meta"].get("topic", ""))
+            self._session_stats["sources_used"].add(item["meta"].get("source_file", ""))
+            context_blocks.append(f"SOURCE: {item['meta']['source_file']} | TOPIC: {item['meta']['topic']}\n{item['doc']}")
+            source_citations.append({
+                "file": item["meta"]["source_file"],
+                "topic": item["meta"]["topic"],
+                "score": round(item["score"], 3),
+                "preview": item["doc"][:200] + "..."
+            })
+        context = "\n\n".join(context_blocks)
+
+        from src.prompt_templates import DOMAIN_PROMPTS
+        detected_domains = []
+        combined_text = f"{question} {context}".lower()
+        for domain in DOMAIN_PROMPTS.keys():
+            if domain.lower() in combined_text:
+                detected_domains.append(domain)
+
+        system_prompt = get_prompt_for_intent(intent, detected_domains=detected_domains)
+        
+        # Inject metadata if it's the IEEE intent
+        if intent == "ieee_paper_gen" and metadata:
+            meta_str = json.dumps(metadata, indent=2)
+            system_prompt = system_prompt.replace("{metadata}", meta_str)
+        elif "{metadata}" in system_prompt:
+            system_prompt = system_prompt.replace("{metadata}", "N/A - Information not provided by user.")
+
+        messages = [{"role": "system", "content": f"{system_prompt}\n\nDOCUMENT CONTEXT:\n{context}"}]
+
+        for msg in chat_history[-CHAT_HISTORY_CONTEXT_SIZE:]:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+
+        messages.append({"role": "user", "content": question})
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=QA_MAX_TOKENS,
+                temperature=QA_TEMPERATURE
+            )
+            msg = response.choices[0].message
+            content = msg.content
+
+            reasoning_data = getattr(msg, "reasoning", getattr(msg, "reasoning_details", None))
+
+            if not reasoning_data and content and "<think>" in content and "</think>" in content:
+                start = content.find("<think>") + 7
+                end = content.find("</think>")
+                reasoning_data = content[start:end].strip()
+                content = content[end + 8:].strip()
+
+            if not reasoning_data:
+                reasoning_data = "Model processed logic internally (Invisible Reasoning Pipeline)."
+
+            return {
+                "content": content,
+                "reasoning_details": reasoning_data,
+                "intent": intent_result,
+                "sources": source_citations[:5],
+            }
+        except Exception as e:
+            return {
+                "content": f"API Error: {str(e)}",
+                "reasoning_details": None,
+                "intent": intent_result,
+                "sources": [],
+            }
