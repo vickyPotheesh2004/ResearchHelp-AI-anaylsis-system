@@ -1,4 +1,4 @@
-# 🔬 ResearchHelp-AI-anaylsis-system: Advanced AI Document Research & Publishing System
+# 🔬 AI ResearchHelp-AI-anaylsis-system: Advanced AI Document Research & Publishing System
 
 ResearchHelp-AI-anaylsis-system is a next-generation, multi-modal document analysis platform that transforms raw files into structured, queryable knowledge bases. By leveraging **semantic embeddings**, **hybrid retrieval (Vector + BM25)**, **LLM streaming**, and **rich multimedia integrations**, it enables deep research Q&A, auto-generated suggestions, and professional academic publishing — all directly from your uploaded files.
 
