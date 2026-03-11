@@ -1,3 +1,6 @@
+import os
+os.environ["LOKY_MAX_CPU_COUNT"] = "1"
+import concurrent.futures
 import streamlit as st
 import streamlit.components.v1 as components
 import io
