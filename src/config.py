@@ -2,6 +2,7 @@
 Centralized configuration module for ResearchHelp-AI-anaylsis-system AI Document Q&A System.
 All configurable settings should be defined here and accessed via environment variables.
 """
+
 import os
 from dotenv import load_dotenv
 
@@ -12,34 +13,37 @@ load_dotenv()
 # Tesseract OCR path - configurable via environment variable
 # Default to common Windows installation path
 TESSERACT_PATH = os.getenv(
-    "TESSERACT_PATH", 
-    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    "TESSERACT_PATH", r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 )
 
 # ChromaDB persistence path
-CHROMA_DB_PATH = os.getenv(
-    "CHROMA_DB_PATH", 
-    "./chroma_db"
-)
+CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "./chroma_db")
 
 # ==================== LLM MODELS ====================
 
+# Free model identifiers for OpenRouter
+# Model 1: Z.ai GLM 4.5 Air - Fast general chat (best for simple/fast tasks)
+GLM_45_AIR_MODEL = "z-ai/glm-4.5-air:free"
+
+# Model 2: Arcee AI Trinity Large Preview - Reasoning capable (best for Q&A)
+TRINITY_LARGE_MODEL = "arcee-ai/trinity-large-preview:free"
+
+# Model 3: NVIDIA Nemotron 3 Super - Best reasoning (best for complex research)
+NEMOTRON_3_SUPER_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+
 # Default LLM model for general Q&A
 DEFAULT_LLM_MODEL = os.getenv(
-    "LLM_MODEL", 
-    "google/gemini-2.0-flash-001"
+    "LLM_MODEL", TRINITY_LARGE_MODEL  # Use Trinity for Q&A - good reasoning
 )
 
-# Model for research engine (can be different for specialized tasks)
+# Model for research engine (complex analysis - needs best reasoning)
 RESEARCH_LLM_MODEL = os.getenv(
-    "RESEARCH_LLM_MODEL",
-    "google/gemini-2.0-flash-001"
+    "RESEARCH_LLM_MODEL", NEMOTRON_3_SUPER_MODEL  # Use Nemotron - best reasoning
 )
 
-# Model for intent classification (fast, efficient model)
+# Model for intent classification (fast, efficient model - simple task)
 INTENT_CLASSIFIER_MODEL = os.getenv(
-    "INTENT_CLASSIFIER_MODEL",
-    "google/gemini-2.0-flash-001"
+    "INTENT_CLASSIFIER_MODEL", GLM_45_AIR_MODEL  # Use GLM 4.5 Air - fastest for simple task
 )
 
 # ==================== LLM PARAMETERS ====================
@@ -50,12 +54,22 @@ TOPIC_TEMPERATURE = float(os.getenv("TOPIC_TEMPERATURE", "0.1"))
 TOPIC_TEXT_CHUNK_SIZE = int(os.getenv("TOPIC_TEXT_CHUNK_SIZE", "500"))
 
 # Research engine parameters
-RESEARCH_OVERVIEW_MAX_TOKENS = int(os.getenv("RESEARCH_OVERVIEW_MAX_TOKENS", "2000"))
-RESEARCH_OVERVIEW_TEMPERATURE = float(os.getenv("RESEARCH_OVERVIEW_TEMPERATURE", "0.3"))
-RESEARCH_SUGGESTIONS_MAX_TOKENS = int(os.getenv("RESEARCH_SUGGESTIONS_MAX_TOKENS", "1000"))
-RESEARCH_SUGGESTIONS_TEMPERATURE = float(os.getenv("RESEARCH_SUGGESTIONS_TEMPERATURE", "0.4"))
+RESEARCH_OVERVIEW_MAX_TOKENS = int(
+    os.getenv("RESEARCH_OVERVIEW_MAX_TOKENS", "2000")
+)
+RESEARCH_OVERVIEW_TEMPERATURE = float(
+    os.getenv("RESEARCH_OVERVIEW_TEMPERATURE", "0.3")
+)
+RESEARCH_SUGGESTIONS_MAX_TOKENS = int(
+    os.getenv("RESEARCH_SUGGESTIONS_MAX_TOKENS", "1000")
+)
+RESEARCH_SUGGESTIONS_TEMPERATURE = float(
+    os.getenv("RESEARCH_SUGGESTIONS_TEMPERATURE", "0.4")
+)
 RESEARCH_ADDON_MAX_TOKENS = int(os.getenv("RESEARCH_ADDON_MAX_TOKENS", "3000"))
-RESEARCH_ADDON_TEMPERATURE = float(os.getenv("RESEARCH_ADDON_TEMPERATURE", "0.3"))
+RESEARCH_ADDON_TEMPERATURE = float(
+    os.getenv("RESEARCH_ADDON_TEMPERATURE", "0.3")
+)
 
 # QA engine parameters
 QA_MAX_TOKENS = int(os.getenv("QA_MAX_TOKENS", "3000"))
@@ -76,7 +90,9 @@ BM25_SEARCH_WEIGHT = float(os.getenv("BM25_SEARCH_WEIGHT", "0.3"))
 DEFAULT_TOP_K = int(os.getenv("DEFAULT_TOP_K", "8"))
 
 # Topic segmentation threshold
-TOPIC_SIMILARITY_THRESHOLD = float(os.getenv("TOPIC_SIMILARITY_THRESHOLD", "0.78"))
+TOPIC_SIMILARITY_THRESHOLD = float(
+    os.getenv("TOPIC_SIMILARITY_THRESHOLD", "0.78")
+)
 
 # Topic segment overlap (number of sentences to overlap between segments)
 TOPIC_SEGMENT_OVERLAP = int(os.getenv("TOPIC_SEGMENT_OVERLAP", "2"))
@@ -99,37 +115,47 @@ CHAT_HISTORY_CONTEXT_SIZE = int(os.getenv("CHAT_HISTORY_CONTEXT_SIZE", "6"))
 # ==================== EMBEDDINGS ====================
 
 # Sentence transformer model for embeddings
-EMBEDDING_MODEL = os.getenv(
-    "EMBEDDING_MODEL",
-    "all-mpnet-base-v2"
-)
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-mpnet-base-v2")
 
 # ==================== FILE LIMITS ====================
 
 # File size limits (in bytes)
-MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", str(50 * 1024 * 1024)))  # 50MB default
-MAX_TEXT_LENGTH = int(os.getenv("MAX_TEXT_LENGTH", str(10 * 1024 * 1024)))  # 10MB default
+MAX_FILE_SIZE = int(
+    os.getenv("MAX_FILE_SIZE", str(50 * 1024 * 1024))
+)  # 50MB default
+MAX_TEXT_LENGTH = int(
+    os.getenv("MAX_TEXT_LENGTH", str(10 * 1024 * 1024))
+)  # 10MB default
 
 # ==================== API SETTINGS ====================
 
 # OpenRouter API configuration
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_BASE_URL = os.getenv(
+    "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
+)
 
 # ==================== VALIDATION ====================
+
 
 def validate_config():
     """Validate required configuration settings."""
     errors = []
-    
+
     if not OPENROUTER_API_KEY:
         errors.append("OPENROUTER_API_KEY is not set in environment variables")
-    elif "placeholder" in OPENROUTER_API_KEY.lower() or "your_" in OPENROUTER_API_KEY.lower():
-        errors.append("OPENROUTER_API_KEY appears to be a placeholder - please set a valid API key")
-    
+    elif (
+        "placeholder" in OPENROUTER_API_KEY.lower()
+        or "your_" in OPENROUTER_API_KEY.lower()
+    ):
+        errors.append(
+            "OPENROUTER_API_KEY appears to be a placeholder - please set a valid API key"
+        )
+
     if errors:
         return False, errors
     return True, []
+
 
 # ==================== LOGGING ====================
 

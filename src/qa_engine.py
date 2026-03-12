@@ -1,5 +1,4 @@
-﻿import os
-import logging
+import json
 import atexit
 import chromadb
 from dotenv import load_dotenv
@@ -10,7 +9,7 @@ from src.text_preprocessor import clean_text
 from src.intent_classifier import IntentClassifier
 from src.prompt_templates import get_prompt_for_intent
 from src.research_engine import ResearchEngine
-from src.config import CHROMA_DB_PATH, DEFAULT_LLM_MODEL, DEFAULT_TOP_K, THREAD_POOL_MAX_WORKERS, RETRIEVAL_TIMEOUT, CHAT_HISTORY_CONTEXT_SIZE, QA_MAX_TOKENS, QA_TEMPERATURE
+from src.config import CHROMA_DB_PATH, DEFAULT_TOP_K, THREAD_POOL_MAX_WORKERS, RETRIEVAL_TIMEOUT, CHAT_HISTORY_CONTEXT_SIZE, QA_MAX_TOKENS, QA_TEMPERATURE
 from src.llm_client import get_llm_client
 from src.logging_utils import get_logger
 
@@ -19,6 +18,7 @@ load_dotenv()
 # Get logger - this ensures logging is configured
 logger = get_logger(__name__)
 
+
 class QAEngine:
     def __init__(self):
         llm_client = get_llm_client()
@@ -26,7 +26,8 @@ class QAEngine:
             raise ValueError("OPENROUTER_API_KEY not found in environment variables.")
         
         self.client = llm_client.client
-        self.model = DEFAULT_LLM_MODEL
+        self.llm_client = llm_client  # Use the full client for helper methods
+        self.model = llm_client.trinity_model  # Use Trinity Large - reasoning for Q&A
 
         self.chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
         self.collection = self.chroma_client.get_or_create_collection(name="active_session")
@@ -39,7 +40,11 @@ class QAEngine:
         self._bm25_metas = []
         self._bm25_index = None
         self._available_topics = []
-        self._session_stats = {"questions_asked": 0, "topics_accessed": set(), "sources_used": set()}
+        # Use list instead of set for serialization compatibility
+        self._session_stats = {"questions_asked": 0, "topics_accessed": [], "sources_used": []}
+        # Internal sets for deduplication tracking during session
+        self._session_stats_topics = set()
+        self._session_stats_sources = set()
         self._executor = ThreadPoolExecutor(max_workers=THREAD_POOL_MAX_WORKERS)
         
         # Register cleanup handler
@@ -62,7 +67,11 @@ class QAEngine:
         self._bm25_docs = []
         self._bm25_metas = []
         self._available_topics = []
-        self._session_stats = {"questions_asked": 0, "topics_accessed": set(), "sources_used": set()}
+        # Use list instead of set for serialization compatibility
+        self._session_stats = {"questions_asked": 0, "topics_accessed": [], "sources_used": []}
+        # Reset internal sets for deduplication tracking
+        self._session_stats_topics = set()
+        self._session_stats_sources = set()
 
         for filename, raw_content in documents_dict.items():
             cleaned_content = clean_text(raw_content)
@@ -191,8 +200,15 @@ class QAEngine:
         source_citations = []
         context_blocks = []
         for item in retrieved:
-            self._session_stats["topics_accessed"].add(item["meta"].get("topic", ""))
-            self._session_stats["sources_used"].add(item["meta"].get("source_file", ""))
+            topic = item["meta"].get("topic", "")
+            source = item["meta"].get("source_file", "")
+            # Use internal sets for deduplication, then convert to list for stats
+            if topic and topic not in self._session_stats_topics:
+                self._session_stats_topics.add(topic)
+                self._session_stats["topics_accessed"].append(topic)
+            if source and source not in self._session_stats_sources:
+                self._session_stats_sources.add(source)
+                self._session_stats["sources_used"].append(source)
             context_blocks.append(f"SOURCE: {item['meta']['source_file']} | TOPIC: {item['meta']['topic']}\n{item['doc']}")
             source_citations.append({
                 "file": item["meta"]["source_file"],
@@ -293,8 +309,15 @@ class QAEngine:
         source_citations = []
         context_blocks = []
         for item in retrieved:
-            self._session_stats["topics_accessed"].add(item["meta"].get("topic", ""))
-            self._session_stats["sources_used"].add(item["meta"].get("source_file", ""))
+            topic = item["meta"].get("topic", "")
+            source = item["meta"].get("source_file", "")
+            # Use internal sets for deduplication, then convert to list for stats
+            if topic and topic not in self._session_stats_topics:
+                self._session_stats_topics.add(topic)
+                self._session_stats["topics_accessed"].append(topic)
+            if source and source not in self._session_stats_sources:
+                self._session_stats_sources.add(source)
+                self._session_stats["sources_used"].append(source)
             context_blocks.append(f"SOURCE: {item['meta']['source_file']} | TOPIC: {item['meta']['topic']}\n{item['doc']}")
             source_citations.append({
                 "file": item["meta"]["source_file"],
@@ -328,8 +351,8 @@ class QAEngine:
         messages.append({"role": "user", "content": question})
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
+            # Use create_qa_completion which enables reasoning for Trinity model
+            response = self.llm_client.create_qa_completion(
                 messages=messages,
                 max_tokens=QA_MAX_TOKENS,
                 temperature=QA_TEMPERATURE

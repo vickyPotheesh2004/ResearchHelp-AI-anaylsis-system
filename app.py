@@ -1,15 +1,11 @@
-import os
-os.environ["LOKY_MAX_CPU_COUNT"] = "1"
-import concurrent.futures
 import streamlit as st
 import streamlit.components.v1 as components
 import io
 import re
-import json
 import os
 from datetime import datetime
 from docx import Document as DocxDocument
-from docx.shared import Inches, Pt, RGBColor
+from docx.shared import Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from src.extractor import process_file
@@ -29,12 +25,12 @@ def sanitize_filename(filename: str) -> str:
     # Remove any path components
     filename = os.path.basename(filename)
     # Remove any special characters except alphanumeric, underscore, hyphen, and dot
-    filename = re.sub(r'[^\w\s.-]', '', filename)
+    filename = re.sub(r"[^\w\s.-]", "", filename)
     # Limit filename length
     max_length = 200
     if len(filename) > max_length:
         name, ext = os.path.splitext(filename)
-        filename = name[:max_length - len(ext)] + ext
+        filename = name[: max_length - len(ext)] + ext
     return filename or "unnamed_file"
 
 
@@ -43,20 +39,22 @@ def sanitize_for_markdown(text: str) -> str:
     if not text:
         return ""
     # Escape HTML special characters
-    text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     # Escape markdown special characters that could break rendering
-    text = text.replace('[', '&#91;').replace(']', '&#93;')
+    text = text.replace("[", "&#91;").replace("]", "&#93;")
     return text
 
 
 def render_content_with_mermaid(content):
     import urllib.parse
-    
-    image_pattern = re.compile(r'<image_prompt>(.*?)</image_prompt>', re.DOTALL)
-    images = image_pattern.findall(content)
-    clean_content = image_pattern.sub('', content)
 
-    mermaid_pattern = re.compile(r'```mermaid\s*\n(.*?)```', re.DOTALL)
+    image_pattern = re.compile(
+        r"<image_prompt>(.*?)</image_prompt>", re.DOTALL
+    )
+    images = image_pattern.findall(content)
+    clean_content = image_pattern.sub("", content)
+
+    mermaid_pattern = re.compile(r"```mermaid\s*\n(.*?)```", re.DOTALL)
     parts = mermaid_pattern.split(clean_content)
 
     if len(parts) == 1:
@@ -68,7 +66,9 @@ def render_content_with_mermaid(content):
                 if text:
                     st.markdown(text)
             else:
-                mermaid_code = part.strip().replace('`', "'") # Escape backticks that would break JS string
+                mermaid_code = part.strip().replace("`", "'")
+                # Remove common characters that break Mermaid labels if not perfect
+                mermaid_code = re.sub(r'[(){}\[\]]', '', mermaid_code)
                 html = f"""
                 <div style="background:#ffffff; border:1px solid #e0e0e0; border-radius:12px; padding:20px; margin:12px 0; text-align:center;">
                     <div class="mermaid" style="display:flex; justify-content:center; min-height: 200px;">
@@ -95,28 +95,39 @@ def render_content_with_mermaid(content):
     for img_prompt in images:
         encoded = urllib.parse.quote(img_prompt.strip())
         image_url = f"https://image.pollinations.ai/prompt/{encoded}?width=800&height=400&nologo=true"
-        st.image(image_url, caption="AI Generated Visualization", use_container_width=True)
+        st.image(
+            image_url,
+            caption="AI Generated Visualization",
+            use_container_width=True,
+        )
 
 
 def _clean_for_speech(text):
-    text = re.sub(r'<image_prompt>.*?</image_prompt>', 'Image generated.', text, flags=re.DOTALL)
-    text = re.sub(r'```mermaid.*?```', 'Diagram included.', text, flags=re.DOTALL)
-    text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)
-    text = re.sub(r'#{1,6}\s*', '', text)
-    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
-    text = re.sub(r'\*(.*?)\*', r'\1', text)
-    text = re.sub(r'`(.*?)`', r'\1', text)
-    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
-    text = re.sub(r'[|\-]{3,}', '', text)
-    text = re.sub(r'<[^>]+>', '', text)
-    text = re.sub(r'\n{3,}', '\n\n', text)
+    text = re.sub(
+        r"<image_prompt>.*?</image_prompt>",
+        "Image generated.",
+        text,
+        flags=re.DOTALL,
+    )
+    text = re.sub(
+        r"```mermaid.*?```", "Diagram included.", text, flags=re.DOTALL
+    )
+    text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
+    text = re.sub(r"#{1,6}\s*", "", text)
+    text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
+    text = re.sub(r"\*(.*?)\*", r"\1", text)
+    text = re.sub(r"`(.*?)`", r"\1", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    text = re.sub(r"[|\-]{3,}", "", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
 
 def render_voice_controller():
     """Injects a self-healing persistent Microphone icon into the chat bar."""
-    
-    html = f"""
+
+    html = f"""  # noqa: F541
     <div style="display:none">
         <script>
             // Persistent state
@@ -134,8 +145,8 @@ def render_voice_controller():
                 recognition.onstart = function() {{ isRecording = true; updateBtnUI(true); }};
                 recognition.onend = function() {{ isRecording = false; updateBtnUI(false); }};
                 recognition.onerror = function() {{ isRecording = false; updateBtnUI(false); }};
-                recognition.onresult = function(event) {{ 
-                    injectToChat(event.results[0][0].transcript); 
+                recognition.onresult = function(event) {{
+                    injectToChat(event.results[0][0].transcript);
                 }};
             }}
             
@@ -203,10 +214,17 @@ def render_voice_controller():
 
 def speak_text(text, key):
     clean = _clean_for_speech(text)
-    safe = clean.replace('\\', '\\\\').replace('`', '').replace('"', '&quot;').replace("'", "\\'").replace('\n', ' ').replace('\r', '')
+    safe = (
+        clean.replace("\\", "\\\\")
+        .replace("`", "")
+        .replace('"', "&quot;")
+        .replace("'", "\\'")
+        .replace("\n", " ")
+        .replace("\r", "")
+    )
     # Truncate for very long content to avoid browser limits
     if len(safe) > 5000:
-        safe = safe[:5000] + '... Content truncated for audio playback.'
+        safe = safe[:5000] + "... Content truncated for audio playback."
     html = f"""
     <div style="margin: 4px 0;">
         <button id="tts-btn-{key}" onclick="toggleSpeech_{key}()" style="
@@ -250,11 +268,12 @@ def speak_text(text, key):
     """
     components.html(html, height=42)
 
+
 st.set_page_config(
     page_title="AI Document Q&A System",
     page_icon="🔬",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 # Validate configuration on startup
@@ -263,7 +282,9 @@ if not is_valid:
     st.error("⚠️ Configuration Error:")
     for error in config_errors:
         st.error(f"  • {error}")
-    st.info("Please set up your .env file with a valid OpenRouter API key. Copy .env.example to .env and add your key.")
+    st.info(
+        "Please set up your .env file with a valid OpenRouter API key. Copy .env.example to .env and add your key."
+    )
     st.stop()
 
 CUSTOM_CSS = """
@@ -438,12 +459,15 @@ CUSTOM_CSS = """
 
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-st.markdown("""
+st.markdown(
+    """
 <div class="main-header">
     <h1>🔬 ResearchHelp-AI-anaylsis-system: AI Document Q&A System</h1>
     <p>Upload documents • Ask questions • Get research insights • Download analysis</p>
 </div>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
@@ -463,25 +487,29 @@ if "ieee_metadata" not in st.session_state:
         "authors": "",
         "emails": "",
         "colleges": "",
-        "additional_notes": ""
+        "additional_notes": "",
     }
 # Lock for concurrent upload protection
 if "processing_lock" not in st.session_state:
     st.session_state.processing_lock = False
 
 
-def generate_markdown_export(history, overview="", suggestions=None, stats=None):
+def generate_markdown_export(
+    history, overview="", suggestions=None, stats=None
+):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    md = f"# 🔬 ResearchHelp-AI-anaylsis-system: AI Document Q&A System Report\n\n"
+    md = "# 🔬 ResearchHelp-AI-anaylsis-system: AI Document Q&A System Report\n\n"
     md += f"**Generated**: {timestamp}\n\n---\n\n"
 
     if stats:
         md += "## 📊 Session Analytics\n\n"
-        md += f"| Metric | Value |\n|---|---|\n"
+        md += "| Metric | Value |\n|---|---|\n"
         md += f"| Questions Asked | {stats.get('questions_asked', 0)} |\n"
         md += f"| Topics Explored | {stats.get('topics_accessed', 0)} |\n"
         md += f"| Sources Referenced | {stats.get('sources_used', 0)} |\n"
-        md += f"| Total Topics Available | {stats.get('total_topics', 0)} |\n\n"
+        md += (
+            f"| Total Topics Available | {stats.get('total_topics', 0)} |\n\n"
+        )
 
     if overview:
         md += f"## 📄 Document Overview\n\n{overview}\n\n---\n\n"
@@ -505,7 +533,11 @@ def generate_markdown_export(history, overview="", suggestions=None, stats=None)
 
         md += f"{msg['content']}\n\n"
 
-        if msg.get("reasoning_details") and msg["reasoning_details"] != "Model processed logic internally (Invisible Reasoning Pipeline).":
+        if (
+            msg.get("reasoning_details")
+            and msg["reasoning_details"]
+            != "Model processed logic internally (Invisible Reasoning Pipeline)."
+        ):
             md += f"<details><summary>Logic Trace</summary>\n\n> {msg['reasoning_details']}\n\n</details>\n\n"
 
         if msg.get("sources"):
@@ -542,26 +574,35 @@ th { background: #1e1e2e; color: #a8edea; }
 hr { border: none; border-top: 1px solid #313147; margin: 24px 0; }
 </style></head><body>
 """
-    html += f"<h1>🔬 ResearchHelp-AI-anaylsis-system: AI Document Q&A System Report</h1>"
+    html += "<h1>🔬 ResearchHelp-AI-anaylsis-system: AI Document Q&A System Report</h1>"
     html += f"<p style='text-align:center;color:#888;'>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p><hr>"
 
     if stats:
         html += "<h2>📊 Session Analytics</h2><div class='stat-grid'>"
-        for key, label in [("questions_asked", "Questions"), ("topics_accessed", "Topics"), ("sources_used", "Sources"), ("total_topics", "Total Topics")]:
+        for key, label in [
+            ("questions_asked", "Questions"),
+            ("topics_accessed", "Topics"),
+            ("sources_used", "Sources"),
+            ("total_topics", "Total Topics"),
+        ]:
             html += f"<div class='stat'><div class='stat-val'>{stats.get(key, 0)}</div><div class='stat-lbl'>{label}</div></div>"
         html += "</div>"
 
     if overview:
-        html += f"<h2>📄 Document Overview</h2><div class='msg'>{overview}</div>"
+        html += (
+            f"<h2>📄 Document Overview</h2><div class='msg'>{overview}</div>"
+        )
 
     html += "<h2>💬 Research Session</h2>"
     for msg in history:
         role_class = "user" if msg["role"] == "user" else "assistant"
-        role_label = "👤 Researcher" if msg["role"] == "user" else "🧠 AI Analyst"
+        role_label = (
+            "👤 Researcher" if msg["role"] == "user" else "🧠 AI Analyst"
+        )
         html += f"<div class='msg {role_class}'><div class='role'>{role_label}</div>"
         if msg.get("intent"):
             html += f"<span class='intent-tag'>{msg['intent'].get('emoji', '')} {msg['intent'].get('label', '')}</span>"
-        content = msg['content'].replace('\n', '<br>')
+        content = msg["content"].replace("\n", "<br>")
         html += f"<div>{content}</div></div>"
 
     html += "</body></html>"
@@ -571,32 +612,37 @@ hr { border: none; border-top: 1px solid #313147; margin: 24px 0; }
 def generate_docx_export(history, overview="", suggestions=None, stats=None):
     doc = DocxDocument()
 
-    style = doc.styles['Normal']
+    style = doc.styles["Normal"]
     font = style.font
-    font.name = 'Calibri'
+    font.name = "Calibri"
     font.size = Pt(11)
     font.color.rgb = RGBColor(0x33, 0x33, 0x33)
 
-    title = doc.add_heading('ResearchHelp-AI-anaylsis-system: AI Document Q&A System Report', level=0)
+    title = doc.add_heading(
+        "ResearchHelp-AI-anaylsis-system: AI Document Q&A System Report",
+        level=0,
+    )
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    subtitle = doc.add_paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    subtitle = doc.add_paragraph(
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    )
     subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
     subtitle.runs[0].font.color.rgb = RGBColor(0x88, 0x88, 0x88)
 
     if stats:
-        doc.add_heading('Session Analytics', level=1)
-        table = doc.add_table(rows=1, cols=4, style='Light Grid Accent 1')
+        doc.add_heading("Session Analytics", level=1)
+        table = doc.add_table(rows=1, cols=4, style="Light Grid Accent 1")
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
         hdr = table.rows[0].cells
-        hdr[0].text = 'Questions Asked'
-        hdr[1].text = 'Topics Explored'
-        hdr[2].text = 'Sources Used'
-        hdr[3].text = 'Total Topics'
+        hdr[0].text = "Questions Asked"
+        hdr[1].text = "Topics Explored"
+        hdr[2].text = "Sources Used"
+        hdr[3].text = "Total Topics"
         row = table.add_row().cells
-        row[0].text = str(stats.get('questions_asked', 0))
-        row[1].text = str(stats.get('topics_accessed', 0))
-        row[2].text = str(stats.get('sources_used', 0))
-        row[3].text = str(stats.get('total_topics', 0))
+        row[0].text = str(stats.get("questions_asked", 0))
+        row[1].text = str(stats.get("topics_accessed", 0))
+        row[2].text = str(stats.get("sources_used", 0))
+        row[3].text = str(stats.get("total_topics", 0))
         for cell in row:
             cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
             for run in cell.paragraphs[0].runs:
@@ -605,37 +651,45 @@ def generate_docx_export(history, overview="", suggestions=None, stats=None):
         doc.add_paragraph()
 
     if overview:
-        doc.add_heading('Document Overview', level=1)
-        for line in overview.split('\n'):
+        doc.add_heading("Document Overview", level=1)
+        for line in overview.split("\n"):
             line = line.strip()
             if not line:
                 continue
-            if line.startswith('## '):
-                doc.add_heading(line.replace('## ', '').replace('#', ''), level=2)
-            elif line.startswith('### '):
-                doc.add_heading(line.replace('### ', '').replace('#', ''), level=3)
-            elif line.startswith('- ') or line.startswith('* '):
-                doc.add_paragraph(line[2:], style='List Bullet')
+            if line.startswith("## "):
+                doc.add_heading(
+                    line.replace("## ", "").replace("#", ""), level=2
+                )
+            elif line.startswith("### "):
+                doc.add_heading(
+                    line.replace("### ", "").replace("#", ""), level=3
+                )
+            elif line.startswith("- ") or line.startswith("* "):
+                doc.add_paragraph(line[2:], style="List Bullet")
             else:
-                clean = line.replace('**', '').replace('*', '').replace('`', '')
+                clean = (
+                    line.replace("**", "").replace("*", "").replace("`", "")
+                )
                 doc.add_paragraph(clean)
 
     if suggestions:
-        doc.add_heading('AI-Generated Suggestions', level=1)
+        doc.add_heading("AI-Generated Suggestions", level=1)
         for i, s in enumerate(suggestions, 1):
             p = doc.add_paragraph()
             run = p.add_run(f"{i}. {s.get('title', f'Suggestion {i}')}")
             run.font.bold = True
             run.font.size = Pt(12)
-            run.font.color.rgb = RGBColor(0x1a, 0x3a, 0x5c)
-            doc.add_paragraph(s.get('description', ''))
+            run.font.color.rgb = RGBColor(0x1A, 0x3A, 0x5C)
+            doc.add_paragraph(s.get("description", ""))
             cat = doc.add_paragraph()
-            cat_run = cat.add_run(f"Category: {s.get('category', 'general').upper()}")
+            cat_run = cat.add_run(
+                f"Category: {s.get('category', 'general').upper()}"
+            )
             cat_run.font.italic = True
             cat_run.font.size = Pt(9)
             cat_run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
 
-    doc.add_heading('Research Q&A Session', level=1)
+    doc.add_heading("Research Q&A Session", level=1)
     for msg in history:
         role = "Researcher (User)" if msg["role"] == "user" else "AI Analyst"
         p = doc.add_paragraph()
@@ -643,29 +697,35 @@ def generate_docx_export(history, overview="", suggestions=None, stats=None):
         role_run.font.bold = True
         role_run.font.size = Pt(11)
         if msg["role"] == "user":
-            role_run.font.color.rgb = RGBColor(0x1a, 0x5a, 0x8c)
+            role_run.font.color.rgb = RGBColor(0x1A, 0x5A, 0x8C)
         else:
-            role_run.font.color.rgb = RGBColor(0x8c, 0x1a, 0x5a)
+            role_run.font.color.rgb = RGBColor(0x8C, 0x1A, 0x5A)
 
         if msg.get("intent") and msg["role"] == "assistant":
             intent = msg["intent"]
             intent_p = doc.add_paragraph()
-            intent_run = intent_p.add_run(f"[{intent.get('emoji', '')} {intent.get('label', '')}]")
+            intent_run = intent_p.add_run(
+                f"[{intent.get('emoji', '')} {intent.get('label', '')}]"
+            )
             intent_run.font.italic = True
             intent_run.font.size = Pt(9)
             intent_run.font.color.rgb = RGBColor(0x66, 0x66, 0x99)
 
-        content = msg['content']
-        for line in content.split('\n'):
+        content = msg["content"]
+        for line in content.split("\n"):
             line = line.strip()
             if not line:
                 continue
-            if line.startswith('## '):
-                doc.add_heading(line.replace('## ', '').replace('#', ''), level=3)
-            elif line.startswith('- ') or line.startswith('* '):
-                doc.add_paragraph(line[2:], style='List Bullet')
+            if line.startswith("## "):
+                doc.add_heading(
+                    line.replace("## ", "").replace("#", ""), level=3
+                )
+            elif line.startswith("- ") or line.startswith("* "):
+                doc.add_paragraph(line[2:], style="List Bullet")
             else:
-                clean = line.replace('**', '').replace('*', '').replace('`', '')
+                clean = (
+                    line.replace("**", "").replace("*", "").replace("`", "")
+                )
                 doc.add_paragraph(clean)
 
         if msg.get("sources") and msg["role"] == "assistant":
@@ -678,7 +738,9 @@ def generate_docx_export(history, overview="", suggestions=None, stats=None):
                 src_run.font.size = Pt(9)
                 src_run.font.color.rgb = RGBColor(0x44, 0x44, 0x88)
 
-        doc.add_paragraph('─' * 60).runs[0].font.color.rgb = RGBColor(0xCC, 0xCC, 0xCC)
+        doc.add_paragraph("─" * 60).runs[0].font.color.rgb = RGBColor(
+            0xCC, 0xCC, 0xCC
+        )
 
     buffer = io.BytesIO()
     doc.save(buffer)
@@ -688,10 +750,10 @@ def generate_docx_export(history, overview="", suggestions=None, stats=None):
 
 def generate_ieee_docx(content, metadata):
     doc = DocxDocument()
-    
-    # IEEE papers usually have a specific style. 
+
+    # IEEE papers usually have a specific style.
     # We'll simulate a professional academic layout.
-    
+
     # Title
     title_text = metadata.get("title") or "Research Paper Title"
     p_title = doc.add_paragraph()
@@ -699,69 +761,77 @@ def generate_ieee_docx(content, metadata):
     run_title = p_title.add_run(title_text.upper())
     run_title.font.bold = True
     run_title.font.size = Pt(24)
-    run_title.font.name = 'Times New Roman'
-    
+    run_title.font.name = "Times New Roman"
+
     # Authors
     p_authors = doc.add_paragraph()
     p_authors.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run_authors = p_authors.add_run(metadata.get("authors") or "Author Names Not Provided")
+    run_authors = p_authors.add_run(
+        metadata.get("authors") or "Author Names Not Provided"
+    )
     run_authors.font.size = Pt(11)
-    run_authors.font.name = 'Times New Roman'
-    
+    run_authors.font.name = "Times New Roman"
+
     # Affiliations & Emails
     p_affil = doc.add_paragraph()
     p_affil.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    affil_text = f"{metadata.get('colleges', '')}\n{metadata.get('emails', '')}"
+    affil_text = (
+        f"{metadata.get('colleges', '')}\n{metadata.get('emails', '')}"
+    )
     run_affil = p_affil.add_run(affil_text)
     run_affil.font.italic = True
     run_affil.font.size = Pt(10)
-    run_affil.font.name = 'Times New Roman'
-    
-    doc.add_paragraph() # Spacer
-    
+    run_affil.font.name = "Times New Roman"
+
+    doc.add_paragraph()  # Spacer
+
     # Split content into sections
-    sections = content.split('###')
+    sections = content.split("###")
     for section in sections:
         section = section.strip()
         if not section:
             continue
-            
-        lines = section.split('\n')
+
+        lines = section.split("\n")
         header = lines[0].strip()
-        body = '\n'.join(lines[1:]).strip()
-        
+        body = "\n".join(lines[1:]).strip()
+
         # Section Heading
         p_head = doc.add_paragraph()
         run_head = p_head.add_run(header.upper())
         run_head.font.bold = True
         run_head.font.size = Pt(12)
-        run_head.font.name = 'Times New Roman'
-        
+        run_head.font.name = "Times New Roman"
+
         # Section Body
-        for b_line in body.split('\n'):
+        for b_line in body.split("\n"):
             b_line = b_line.strip()
-            if not b_line: continue
-            
+            if not b_line:
+                continue
+
             p_body = doc.add_paragraph()
             p_body.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-            
+
             # Remove markdown bold/italics for the DOCX
-            clean_line = b_line.replace('**', '').replace('*', '').replace('`', '')
-            
+            clean_line = (
+                b_line.replace("**", "").replace("*", "").replace("`", "")
+            )
+
             # Simple bullet point detection
-            if b_line.startswith('- ') or b_line.startswith('* '):
-                p_body.style = 'List Bullet'
+            if b_line.startswith("- ") or b_line.startswith("* "):
+                p_body.style = "List Bullet"
                 run_body = p_body.add_run(clean_line[2:])
             else:
                 run_body = p_body.add_run(clean_line)
-                
+
             run_body.font.size = Pt(10)
-            run_body.font.name = 'Times New Roman'
+            run_body.font.name = "Times New Roman"
 
     buffer = io.BytesIO()
     doc.save(buffer)
     buffer.seek(0)
     return buffer.getvalue()
+
 
 # ─── SIDEBAR ───
 
@@ -770,26 +840,31 @@ with st.sidebar:
     uploaded_files = st.file_uploader(
         "Select files to process",
         accept_multiple_files=True,
-        type=["pdf", "docx", "txt", "csv", "xlsx", "png", "jpg", "jpeg"]
+        type=["pdf", "docx", "txt", "csv", "xlsx", "png", "jpg", "jpeg"],
     )
 
     if st.button("🚀 Process Documents", use_container_width=True):
         if uploaded_files:
             # Check for concurrent processing lock
             if st.session_state.processing_lock:
-                st.warning("⚠️ Processing in progress. Please wait for the current operation to complete.")
+                st.warning(
+                    "⚠️ Processing in progress. Please wait for the current operation to complete."
+                )
             else:
                 # Acquire lock
                 st.session_state.processing_lock = True
                 try:
                     # Sanitize filenames to prevent path traversal attacks
-                    data = {sanitize_filename(f.name): process_file(f)[1] for f in uploaded_files}
+                    data = {
+                        sanitize_filename(f.name): process_file(f)[1]
+                        for f in uploaded_files
+                    }
                     st.session_state.topics_found = {}
                     st.session_state.chat_history = []
                     st.session_state.auto_suggestions = []
                     st.session_state.doc_overview = ""
-                    
-                    # Reset IEEE metadata conditionally or keep it? 
+
+                    # Reset IEEE metadata conditionally or keep it?
                     # Usually keep it as users might upload new files for the same paper
 
                     status_text = st.empty()
@@ -798,11 +873,17 @@ with st.sidebar:
                         if fn not in st.session_state.topics_found:
                             st.session_state.topics_found[fn] = []
                         st.session_state.topics_found[fn].append(topic)
-                        status_text.text(f"Processing: {fn}\nIdentified: {topic}")
+                        status_text.text(
+                            f"Processing: {fn}\nIdentified: {topic}"
+                        )
 
-                    with st.spinner("Extracting text and running semantic segmentation..."):
+                    with st.spinner(
+                        "Extracting text and running semantic segmentation..."
+                    ):
                         try:
-                            st.session_state.ai_engine.ingest_and_segment(data, progress_callback=update_ui)
+                            st.session_state.ai_engine.ingest_and_segment(
+                                data, progress_callback=update_ui
+                            )
                         except Exception as e:
                             st.error(f"Error processing documents: {str(e)}")
                             st.session_state.processing_lock = False
@@ -810,12 +891,20 @@ with st.sidebar:
 
                     with st.spinner("Generating document insights..."):
                         try:
-                            chunks, metas = st.session_state.ai_engine.get_all_chunks()
+                            chunks, metas = (
+                                st.session_state.ai_engine.get_all_chunks()
+                            )
                             if chunks:
-                                st.session_state.doc_overview = st.session_state.ai_engine.research_engine.generate_document_overview(chunks, metas)
-                                st.session_state.auto_suggestions = st.session_state.ai_engine.research_engine.generate_auto_suggestions(chunks, metas)
+                                st.session_state.doc_overview = st.session_state.ai_engine.research_engine.generate_document_overview(
+                                    chunks, metas
+                                )
+                                st.session_state.auto_suggestions = st.session_state.ai_engine.research_engine.generate_auto_suggestions(
+                                    chunks, metas
+                                )
                         except Exception as e:
-                            st.warning(f"Could not generate insights: {str(e)}")
+                            st.warning(
+                                f"Could not generate insights: {str(e)}"
+                            )
 
                     st.session_state.system_ready = True
                     st.success("✅ Processing complete!")
@@ -834,21 +923,26 @@ with st.sidebar:
         for filename, topics in st.session_state.topics_found.items():
             st.markdown(f"**{filename}**")
             unique_topics = list(dict.fromkeys(topics))
-            topic_html = "".join([f'<span class="topic-chip">{t}</span>' for t in unique_topics])
+            topic_html = "".join(
+                [f'<span class="topic-chip">{t}</span>' for t in unique_topics]
+            )
             st.markdown(topic_html, unsafe_allow_html=True)
 
     if st.session_state.system_ready:
         st.divider()
         stats = st.session_state.ai_engine.get_session_stats()
         st.markdown("### 📊 Session Analytics")
-        st.markdown(f"""
+        st.markdown(
+            f"""
         <div class="stats-grid">
             <div class="stat-card"><div class="stat-value">{stats['questions_asked']}</div><div class="stat-label">Questions</div></div>
             <div class="stat-card"><div class="stat-value">{stats['topics_accessed']}</div><div class="stat-label">Topics Hit</div></div>
             <div class="stat-card"><div class="stat-value">{stats['sources_used']}</div><div class="stat-label">Sources</div></div>
             <div class="stat-card"><div class="stat-value">{stats['total_topics']}</div><div class="stat-label">Total Topics</div></div>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     if st.session_state.chat_history:
         st.divider()
@@ -864,11 +958,11 @@ with st.sidebar:
                     st.session_state.chat_history,
                     st.session_state.doc_overview,
                     st.session_state.auto_suggestions,
-                    stats
+                    stats,
                 ),
                 file_name=f"research_report_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
                 mime="text/markdown",
-                use_container_width=True
+                use_container_width=True,
             )
 
         with col2:
@@ -878,11 +972,11 @@ with st.sidebar:
                     st.session_state.chat_history,
                     st.session_state.doc_overview,
                     st.session_state.auto_suggestions,
-                    stats
+                    stats,
                 ),
                 file_name=f"research_report_{datetime.now().strftime('%Y%m%d_%H%M')}.html",
                 mime="text/html",
-                use_container_width=True
+                use_container_width=True,
             )
 
         with col3:
@@ -892,23 +986,28 @@ with st.sidebar:
                     st.session_state.chat_history,
                     st.session_state.doc_overview,
                     st.session_state.auto_suggestions,
-                    stats
+                    stats,
                 ),
                 file_name=f"research_report_{datetime.now().strftime('%Y%m%d_%H%M')}.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True
+                use_container_width=True,
             )
     if not st.session_state.get("system_ready", False):
-        st.markdown("""
+        st.markdown(
+            """
         <div style="text-align: center; padding: 40px 20px;">
             <h1 style="color: #a8edea; margin-bottom: 0;">ResearchHelp-AI-anaylsis-system AI</h1>
             <p style="color: #666;">Document Research & Voice Lab</p>
         </div>
-        """, unsafe_allow_html=True)
-    
+        """,
+            unsafe_allow_html=True,
+        )
+
     render_voice_controller()
-    
-    if st.session_state.system_ready: # Changed from uploaded_file to system_ready to match existing logic
+
+    if (
+        st.session_state.system_ready
+    ):  # Changed from uploaded_file to system_ready to match existing logic
         st.divider()
         if st.button("🗑️ Clear Session", use_container_width=True):
             st.session_state.chat_history = []
@@ -922,7 +1021,8 @@ with st.sidebar:
 # ─── MAIN CONTENT ───
 
 if not st.session_state.system_ready:
-    st.markdown("""
+    st.markdown(
+        """
     <div style="text-align: center; padding: 60px 20px;">
         <h2 style="color: #a8edea; font-weight: 600;">Welcome to the Research Lab 🧪</h2>
         <p style="color: #888; font-size: 1.1rem; max-width: 600px; margin: 0 auto;">
@@ -952,11 +1052,20 @@ if not st.session_state.system_ready:
             </div>
         </div>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 else:
     # ─── Document Overview Tab & Suggestions Tab & IEEE Metadata Tab & Chat Tab ───
     if st.session_state.doc_overview or st.session_state.auto_suggestions:
-        tab_overview, tab_suggestions, tab_ieee, tab_chat = st.tabs(["📄 Document Overview", "💡 AI Suggestions", "📝 IEEE Metadata", "💬 Document Chat"])
+        tab_overview, tab_suggestions, tab_ieee, tab_chat = st.tabs(
+            [
+                "📄 Document Overview",
+                "💡 AI Suggestions",
+                "📝 IEEE Metadata",
+                "💬 Document Chat",
+            ]
+        )
 
         with tab_overview:
             if st.session_state.doc_overview:
@@ -968,11 +1077,26 @@ else:
         with tab_suggestions:
             if st.session_state.auto_suggestions:
                 st.markdown("### 💡 AI-Generated Research Suggestions")
-                st.caption("These suggestions were auto-generated by analyzing your documents.")
+                st.caption(
+                    "These suggestions were auto-generated by analyzing your documents."
+                )
                 for i, s in enumerate(st.session_state.auto_suggestions):
                     cat = s.get("category", "general")
-                    cat_class = f"cat-{cat}" if cat in ["improvement", "innovation", "gap", "research", "optimization"] else "cat-improvement"
-                    st.markdown(f"**{i+1}. {s.get('title', f'Suggestion {i+1}')}**")
+                    cat_class = (
+                        f"cat-{cat}"
+                        if cat
+                        in [
+                            "improvement",
+                            "innovation",
+                            "gap",
+                            "research",
+                            "optimization",
+                        ]
+                        else "cat-improvement"
+                    )
+                    st.markdown(
+                        f"**{i+1}. {s.get('title', f'Suggestion {i+1}')}**"
+                    )
                     st.markdown(f"{s.get('description', '')}")
                     st.markdown(f"*Category: {cat.upper()}*")
                     st.divider()
@@ -980,20 +1104,51 @@ else:
                 st.info("No suggestions generated yet.")
 
             if st.session_state.auto_suggestions:
-                all_sug_text = " ".join([f"{s.get('title','')}: {s.get('description','')}" for s in st.session_state.auto_suggestions])
+                all_sug_text = " ".join(
+                    [
+                        f"{s.get('title','')}: {s.get('description','')}"
+                        for s in st.session_state.auto_suggestions
+                    ]
+                )
                 speak_text(all_sug_text, "suggestions")
 
         with tab_ieee:
             st.markdown("### 📝 IEEE Paper Metadata")
-            st.caption("Provide information for the official IEEE paper generation.")
-            st.session_state.ieee_metadata["title"] = st.text_input("Paper Title", st.session_state.ieee_metadata["title"], key="ieee_title")
-            st.session_state.ieee_metadata["authors"] = st.text_area("Team Members (Names)", st.session_state.ieee_metadata["authors"], placeholder="John Doe, Jane Smith...", key="ieee_authors")
-            st.session_state.ieee_metadata["emails"] = st.text_area("Official Emails", st.session_state.ieee_metadata["emails"], placeholder="john@college.edu, jane@college.edu", key="ieee_emails")
-            st.session_state.ieee_metadata["colleges"] = st.text_area("Colleges / Organizations", st.session_state.ieee_metadata["colleges"], key="ieee_colleges")
-            st.session_state.ieee_metadata["additional_notes"] = st.text_area("Additional Project Notes", st.session_state.ieee_metadata["additional_notes"], key="ieee_notes")
-            
+            st.caption(
+                "Provide information for the official IEEE paper generation."
+            )
+            st.session_state.ieee_metadata["title"] = st.text_input(
+                "Paper Title",
+                st.session_state.ieee_metadata["title"],
+                key="ieee_title",
+            )
+            st.session_state.ieee_metadata["authors"] = st.text_area(
+                "Team Members (Names)",
+                st.session_state.ieee_metadata["authors"],
+                placeholder="John Doe, Jane Smith...",
+                key="ieee_authors",
+            )
+            st.session_state.ieee_metadata["emails"] = st.text_area(
+                "Official Emails",
+                st.session_state.ieee_metadata["emails"],
+                placeholder="john@college.edu, jane@college.edu",
+                key="ieee_emails",
+            )
+            st.session_state.ieee_metadata["colleges"] = st.text_area(
+                "Colleges / Organizations",
+                st.session_state.ieee_metadata["colleges"],
+                key="ieee_colleges",
+            )
+            st.session_state.ieee_metadata["additional_notes"] = st.text_area(
+                "Additional Project Notes",
+                st.session_state.ieee_metadata["additional_notes"],
+                key="ieee_notes",
+            )
+
             if st.checkbox("Ready for Generation"):
-                st.info("You can now ask the AI to 'Generate an IEEE paper' in the Document Chat tab.")
+                st.info(
+                    "You can now ask the AI to 'Generate an IEEE paper' in the Document Chat tab."
+                )
 
     else:
         tab_chat = st.container()
@@ -1002,16 +1157,22 @@ else:
         tab_ieee = None
 
     # ─── Chat Interface ───
-    with tab_chat if (st.session_state.doc_overview or st.session_state.auto_suggestions) else st.container():
+    with (
+        tab_chat
+        if (st.session_state.doc_overview or st.session_state.auto_suggestions)
+        else st.container()
+    ):
         # Render existing history FIRST so input stays at the bottom
         for msg in st.session_state.chat_history:
             with st.chat_message(msg["role"]):
                 if msg.get("intent") and msg["role"] == "assistant":
                     intent = msg["intent"]
-                    intent_class = f"intent-{intent.get('intent', 'document_qa')}"
+                    intent_class = (
+                        f"intent-{intent.get('intent', 'document_qa')}"
+                    )
                     st.markdown(
                         f'<div class="intent-badge {intent_class}">{intent.get("emoji", "📄")} {intent.get("label", "Document Q&A")}</div>',
-                        unsafe_allow_html=True
+                        unsafe_allow_html=True,
                     )
                 if msg.get("reasoning_details") and msg["role"] == "assistant":
                     with st.expander("🧠 View Logic Trace"):
@@ -1020,13 +1181,22 @@ else:
                 if msg["role"] == "assistant":
                     speak_text(msg["content"], f"hist_{id(msg)}")
                 if msg.get("sources") and msg["role"] == "assistant":
-                    with st.expander(f"📚 Sources Referenced ({len(msg['sources'])})"):
+                    with st.expander(
+                        f"📚 Sources Referenced ({len(msg['sources'])})"
+                    ):
                         for src in msg["sources"]:
                             # Sanitize user-provided source data
-                            safe_file = sanitize_for_markdown(src.get('file', ''))
-                            safe_topic = sanitize_for_markdown(src.get('topic', ''))
-                            safe_preview = sanitize_for_markdown(src.get('preview', ''))
-                            st.markdown(f"""
+                            safe_file = sanitize_for_markdown(
+                                src.get("file", "")
+                            )
+                            safe_topic = sanitize_for_markdown(
+                                src.get("topic", "")
+                            )
+                            safe_preview = sanitize_for_markdown(
+                                src.get("preview", "")
+                            )
+                            st.markdown(
+                                f"""
                             <div class="source-card">
                                 <div class="source-header">
                                     <span class="source-file">{safe_file}</span>
@@ -1035,35 +1205,48 @@ else:
                                 <div class="source-topic">{safe_topic}</div>
                                 <div class="source-preview">{safe_preview}</div>
                             </div>
-                            """, unsafe_allow_html=True)
-                
+                            """,
+                                unsafe_allow_html=True,
+                            )
+
                 # IEEE Download Button (History)
-                if msg["role"] == "assistant" and msg.get("intent", {}).get("intent") == "ieee_paper_gen":
-                    ieee_docx = generate_ieee_docx(msg["content"], st.session_state.ieee_metadata)
+                if (
+                    msg["role"] == "assistant"
+                    and msg.get("intent", {}).get("intent") == "ieee_paper_gen"
+                ):
+                    ieee_docx = generate_ieee_docx(
+                        msg["content"], st.session_state.ieee_metadata
+                    )
                     st.download_button(
                         label="📄 Download IEEE Official Paper (.docx)",
                         data=ieee_docx,
                         file_name=f"IEEE_Paper_{st.session_state.ieee_metadata.get('title', 'Generated').replace(' ', '_')}.docx",
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         key=f"dl_ieee_{id(msg)}",
-                        use_container_width=True
+                        use_container_width=True,
                     )
 
-        user_q = st.chat_input("Ask about your documents, request suggestions, or propose research add-ons...")
+        user_q = st.chat_input(
+            "Ask about your documents, request suggestions, or propose research add-ons..."
+        )
         if user_q:
             # Validate input length
             if len(user_q) > MAX_CHAT_INPUT_LENGTH:
-                st.error(f"Input too long. Maximum {MAX_CHAT_INPUT_LENGTH} characters allowed.")
+                st.error(
+                    f"Input too long. Maximum {MAX_CHAT_INPUT_LENGTH} characters allowed."
+                )
                 st.rerun()
             if not user_q.strip():
                 st.warning("Please enter a valid question.")
                 st.rerun()
-            
-            st.session_state.chat_history.append({"role": "user", "content": user_q})
-            
+
+            st.session_state.chat_history.append(
+                {"role": "user", "content": user_q}
+            )
+
             with st.chat_message("user"):
                 st.markdown(user_q)
-                
+
             with st.chat_message("assistant"):
                 stream_meta = {}
                 final_data = {}
@@ -1072,17 +1255,19 @@ else:
 
                 # Pass IEEE metadata to the engine
                 for event in st.session_state.ai_engine.get_answer_stream(
-                    user_q, 
+                    user_q,
                     st.session_state.chat_history[:-1],
-                    metadata=st.session_state.ieee_metadata
+                    metadata=st.session_state.ieee_metadata,
                 ):
                     if event["type"] == "meta":
                         stream_meta = event
                         intent = event.get("intent", {})
-                        intent_class = f"intent-{intent.get('intent', 'document_qa')}"
+                        intent_class = (
+                            f"intent-{intent.get('intent', 'document_qa')}"
+                        )
                         st.markdown(
                             f'<div class="intent-badge {intent_class}">{intent.get("emoji", "📄")} {intent.get("label", "Document Q&A")}</div>',
-                            unsafe_allow_html=True
+                            unsafe_allow_html=True,
                         )
                     elif event["type"] == "token":
                         streamed_text += event["token"]
@@ -1102,13 +1287,22 @@ else:
 
                 sources = stream_meta.get("sources", [])
                 if sources:
-                    with st.expander(f"📚 Sources Referenced ({len(sources)})"):
+                    with st.expander(
+                        f"📚 Sources Referenced ({len(sources)})"
+                    ):
                         for src in sources:
                             # Sanitize user-provided source data
-                            safe_file = sanitize_for_markdown(src.get('file', ''))
-                            safe_topic = sanitize_for_markdown(src.get('topic', ''))
-                            safe_preview = sanitize_for_markdown(src.get('preview', ''))
-                            st.markdown(f"""
+                            safe_file = sanitize_for_markdown(
+                                src.get("file", "")
+                            )
+                            safe_topic = sanitize_for_markdown(
+                                src.get("topic", "")
+                            )
+                            safe_preview = sanitize_for_markdown(
+                                src.get("preview", "")
+                            )
+                            st.markdown(
+                                f"""
                             <div class="source-card">
                                 <div class="source-header">
                                     <span class="source-file">{safe_file}</span>
@@ -1117,25 +1311,34 @@ else:
                                 <div class="source-topic">{safe_topic}</div>
                                 <div class="source-preview">{safe_preview}</div>
                             </div>
-                            """, unsafe_allow_html=True)
+                            """,
+                                unsafe_allow_html=True,
+                            )
 
                 # IEEE Download Button (Current)
-                if stream_meta.get("intent", {}).get("intent") == "ieee_paper_gen":
-                    ieee_docx = generate_ieee_docx(final_content, st.session_state.ieee_metadata)
+                if (
+                    stream_meta.get("intent", {}).get("intent")
+                    == "ieee_paper_gen"
+                ):
+                    ieee_docx = generate_ieee_docx(
+                        final_content, st.session_state.ieee_metadata
+                    )
                     st.download_button(
                         label="📄 Download IEEE Official Paper (.docx)",
                         data=ieee_docx,
                         file_name=f"IEEE_Paper_{st.session_state.ieee_metadata.get('title', 'Generated').replace(' ', '_')}.docx",
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         key="dl_ieee_latest",
-                        use_container_width=True
+                        use_container_width=True,
                     )
 
-            st.session_state.chat_history.append({
-                "role": "assistant",
-                "content": final_content,
-                "reasoning_details": final_data.get("reasoning"),
-                "intent": stream_meta.get("intent"),
-                "sources": stream_meta.get("sources", []),
-            })
+            st.session_state.chat_history.append(
+                {
+                    "role": "assistant",
+                    "content": final_content,
+                    "reasoning_details": final_data.get("reasoning"),
+                    "intent": stream_meta.get("intent"),
+                    "sources": stream_meta.get("sources", []),
+                }
+            )
             st.rerun()

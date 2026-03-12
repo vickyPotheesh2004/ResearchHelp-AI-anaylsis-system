@@ -1,0 +1,96 @@
+# ResearchHelp-AI-anaylsis-system: Security Baseline Rules
+
+You are an expert, security-conscious senior developer. While writing code, prioritize security over speed.
+
+---
+
+## Project Security Requirements
+
+### 1. Secrets Management
+- **NEVER hardcode API keys or secrets** - Use environment variables via `os.getenv()`
+- API keys must be loaded from `.env` file (which is already in `.gitignore`)
+- The project uses OpenRouter API - key is accessed via `OPENROUTER_API_KEY` env var
+- Default models are configured in `src/config.py` - all configurable via environment variables
+
+### 2. Input Sanitization (XSS Prevention)
+- **CRITICAL**: The app extensively uses `unsafe_allow_html=True` in `st.markdown()` calls
+- When rendering user content (from documents), ALWAYS sanitize first using:
+  - `sanitize_for_markdown()` function in `app.py` (lines 38-46) - escapes HTML special chars
+  - Or use Streamlit's native `st.html()` with care
+- When AI-generated content contains user-provided topic names, sanitize before rendering
+- The `sanitize_filename()` function in `app.py` prevents path traversal attacks
+
+### 3. SQL Injection
+- This project uses ChromaDB (vector database) with BM25 - no direct SQL
+- If adding SQL functionality, use parameterized queries only
+
+### 4. Rate Limiting
+- **WARNING**: No rate limiting currently implemented
+- The app makes calls to external AI APIs (OpenRouter) which can lead to:
+  - API cost explosions from abuse
+  - Bot traffic abuse
+  - External service abuse
+- Consider adding rate limiting for production deployments
+
+### 5. Authentication
+- **WARNING**: No authentication system implemented
+- This is a Streamlit app running in local/demo mode
+- For production, consider adding:
+  - Streamlit authentication (streamlit-authenticator)
+  - Or deploy behind a protected gateway
+
+### 6. API Versioning
+- N/A - This is a Streamlit app, not a REST API
+- If converting to API, follow `/api/v1/` versioning pattern
+
+### 7. File Upload Security
+- File size validation: MAX_FILE_SIZE = 50MB (configured in `src/config.py`)
+- Text length validation: MAX_TEXT_LENGTH = 10MB
+- File extension validation: Only accepts pdf, docx, txt, csv, xlsx, png, jpg, jpeg
+- Filename sanitization: Prevents path traversal attacks
+- **NOTE**: No MIME type validation - only extension-based checks
+
+### 8. Dependency Security
+- All dependencies are in `requirements.txt`
+- Key packages include:
+  - `streamlit` - UI framework
+  - `chromadb` - Vector database
+  - `openai` - LLM client
+  - `transformers` - ML models
+  - `PyMuPDF` - PDF processing
+- Keep dependencies updated for security patches
+
+---
+
+## Secure Coding Guidelines
+
+### Before Writing Code:
+1. Flag any potentially insecure architectural decisions
+2. Use established managed services when possible
+3. Validate and sanitize ALL user input
+
+### Patterns to Avoid:
+- Hardcoded credentials or secrets
+- Unsanitized user input in HTML rendering
+- Unrestricted file uploads without size/type validation
+- Direct string concatenation in any query construction
+
+### Patterns to Use:
+- Environment variables for configuration
+- Input validation and sanitization
+- Parameterized queries (if adding database)
+- Content Security Policy headers (if adding server)
+
+---
+
+## Current Security Posture
+
+| Area | Status | Notes |
+|------|--------|-------|
+| Secrets Management | ✅ Secure | API keys in .env, not hardcoded |
+| Input Sanitization | ⚠️ Partial | Has sanitization functions but used inconsistently |
+| SQL Injection | ✅ N/A | No SQL database used |
+| Rate Limiting | ❌ Missing | No rate limiting on API calls |
+| Authentication | ❌ Missing | No auth system |
+| File Uploads | ⚠️ Partial | Size/extension validation, no MIME type check |
+| Dependencies | ✅ OK | Standard packages, keep updated |

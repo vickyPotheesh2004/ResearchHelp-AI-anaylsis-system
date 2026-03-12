@@ -7,39 +7,67 @@ logger = logging.getLogger(__name__)
 
 # Ensure NLTK data is available
 try:
-    nltk.data.find('tokenizers/punkt')
+    nltk.data.find("tokenizers/punkt")
 except LookupError:
     logger.warning("NLTK punkt tokenizer not found. Downloading...")
-    nltk.download('punkt', quiet=True)
+    nltk.download("punkt", quiet=True)
 
 try:
-    nltk.data.find('tokenizers/punkt_tab')
+    nltk.data.find("tokenizers/punkt_tab")
 except LookupError:
     logger.warning("NLTK punkt_tab not found. Downloading...")
     try:
-        nltk.download('punkt_tab', quiet=True)
+        nltk.download("punkt_tab", quiet=True)
     except Exception:
         pass  # Some NLTK versions don't have punkt_tab
 
 FILLERS = [
-    r"\byou know\b", r"\bokay\b", r"\balright\b",
-    r"\buh\b", r"\bum\b", r"\byeah\b",
-    r"\bright\b", r"\bjust\b", r"\bi mean\b"
+    r"\byou know\b",
+    r"\bokay\b",
+    r"\balright\b",
+    r"\buh\b",
+    r"\bum\b",
+    r"\byeah\b",
+    r"\bright\b",
+    r"\bjust\b",
+    r"\bi mean\b",
 ]
 
 ABBREVIATIONS = {
-    "dr.", "mr.", "mrs.", "ms.", "prof.", "sr.", "jr.",
-    "vs.", "etc.", "inc.", "ltd.", "dept.", "approx.",
-    "st.", "ave.", "blvd.", "fig.", "eq.", "ref.",
-    "vol.", "no.", "pp.", "ed.", "rev.", "e.g.", "i.e.",
+    "dr.",
+    "mr.",
+    "mrs.",
+    "ms.",
+    "prof.",
+    "sr.",
+    "jr.",
+    "vs.",
+    "etc.",
+    "inc.",
+    "ltd.",
+    "dept.",
+    "approx.",
+    "st.",
+    "ave.",
+    "blvd.",
+    "fig.",
+    "eq.",
+    "ref.",
+    "vol.",
+    "no.",
+    "pp.",
+    "ed.",
+    "rev.",
+    "e.g.",
+    "i.e.",
 }
 
 
 def smart_sentence_split(text: str) -> list:
     """Split text into sentences intelligently, handling abbreviations."""
-    text = re.sub(r'\s+', ' ', text).strip()
+    text = re.sub(r"\s+", " ", text).strip()
 
-    raw_splits = re.split(r'(?<=[.!?])\s+', text)
+    raw_splits = re.split(r"(?<=[.!?])\s+", text)
 
     sentences = []
     buffer = ""
@@ -47,7 +75,7 @@ def smart_sentence_split(text: str) -> list:
     for fragment in raw_splits:
         buffer = (buffer + " " + fragment).strip() if buffer else fragment
 
-        last_word_match = re.search(r'(\S+)\s*$', buffer)
+        last_word_match = re.search(r"(\S+)\s*$", buffer)
         if last_word_match:
             last_word = last_word_match.group(1).lower()
             if last_word in ABBREVIATIONS:
@@ -75,14 +103,14 @@ def clean_text(text: str) -> str:
 
 def preserve_structure(text: str) -> str:
     """Preserve document structure while normalizing whitespace."""
-    lines = text.split('\n')
+    lines = text.split("\n")
     processed = []
     for line in lines:
         stripped = line.strip()
         if not stripped:
             continue
-        if re.match(r'^(#{1,6}\s|[\d]+\.|[-*•]\s)', stripped):
+        if re.match(r"^(#{1,6}\s|[\d]+\.|[-*•]\s)", stripped):
             processed.append(f"\n{stripped}\n")
         else:
             processed.append(stripped)
-    return ' '.join(processed)
+    return " ".join(processed)

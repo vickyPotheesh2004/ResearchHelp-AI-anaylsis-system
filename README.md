@@ -1,6 +1,6 @@
-# 🔬 ResearchHelp-AI-anaylsis-system: Advanced AI Document Research & Publishing System
+# 🔬 ResearchHelp-AI Analysis System: Advanced AI Document Research & Publishing System
 
-ResearchHelp-AI-anaylsis-system is a next-generation, multi-modal document analysis platform that transforms raw files into structured, queryable knowledge bases. By leveraging **semantic embeddings**, **hybrid retrieval (Vector + BM25)**, **LLM streaming**, and **rich multimedia integrations**, it enables deep research Q&A, auto-generated suggestions, and professional academic publishing — all directly from your uploaded files.
+ResearchHelp-AI Analysis System is a next-generation, multi-modal document analysis platform that transforms raw files into structured, queryable knowledge bases. By leveraging **semantic embeddings**, **hybrid retrieval (Vector + BM25)**, **LLM streaming**, and **rich multimedia integrations**, it enables deep research Q&A, auto-generated suggestions, and professional academic publishing — all directly from your uploaded files.
 
 ---
 
@@ -38,21 +38,21 @@ At the heart of ResearchHelp-AI-anaylsis-system is a 6-category smart routing en
 | 🚫 `off_topic` | "What is the weather?" | Polite redirection to keep the session focused. |
 
 ### 3. Dynamic Domain-Specific Expert Routing
-ResearchHelp-AI-anaylsis-system doesn't just categorize the *intent* of your question; it identifies the *domain* you are researching. 
+ResearchHelp-AI Analysis System doesn't just categorize the *intent* of your question; it identifies the *domain* you are researching. 
 By scanning both your prompt and the retrieved context, the system detects keywords associated with 44 specific disciplines (e.g., `Cybersecurity`, `Maths`, `Deep Learning`, `Computer Networks`, `Biomedical Engineering`). 
 When a domain is detected, ResearchHelp-AI-anaylsis-system dynamically injects an overarching, expert-crafted directive for that specific field into the LLM prompt. This forces the model to:
 - **Adopt a Domain-Specific Analytical Lens** (e.g., evaluating threat limits for Cybersecurity, analyzing packet limits and latency logic for Networks).
 - **Enforce Output Constraints** (e.g., outputting pure LaTeX symbols for Maths, formatting outputs around the SDLC for Software Engineering).
 
 ### 4. The IEEE Official Paper Generator
-ResearchHelp-AI-anaylsis-system acts as an automated collaborative researcher:
+ResearchHelp-AI Analysis System acts as an automated collaborative researcher:
 1. **Metadata Collection**: Enter your team names, official emails, college affiliations, and paper title in the **📝 IEEE Metadata** tab.
 2. **Context Synthesis**: The AI reviews your uploaded documents and your entire chat history.
 3. **Scholarly Prompting**: The `IEEE_PAPER_PROMPT` enforces a strict academic structure (Abstract, Keywords, Introduction, Literature Review, Methodology, Results, Conclusion, References).
 4. **Professional Output**: Generates an instantly downloadable `IEEE_Paper.docx` formatted to simulate professional publication standards.
 
 ### 4. Hybrid Retrieval Engine (Semantic + BM25)
-ResearchHelp-AI-anaylsis-system ensures no piece of context is missed by running a dual-channel retrieval system:
+ResearchHelp-AI Analysis System ensures no piece of context is missed by running a dual-channel retrieval system:
 - **70% Semantic Search (ChromaDB)**: Finds conceptually relevant passages using `all-mpnet-base-v2` dense embeddings, even if different terminology is used.
 - **30% Keyword Search (BM25 Okapi)**: Catches precise, exact-match technical terms that dense embeddings might underrate.
 - **Re-Ranking Pipeline**: Merges, deduplicates, and ranks the top 12 chunks for maximum context injection into the LLM.
@@ -64,7 +64,7 @@ Documents aren't just split randomly; they are segmented semantically:
 - **Abbreviation-Aware Splitting**: Prevents accidental splits on "Dr.", "e.g.", ensuring complete sentences.
 
 ### 6. Auto-Generated Document Insights
-The moment your documents are ingested, ResearchHelp-AI-anaylsis-system provides:
+The moment your documents are ingested, ResearchHelp-AI Analysis System provides:
 - **Document Overview**: A structured, high-level summary of the entire corpus.
 - **AI Suggestions**: 5 categorized, actionable research suggestions (Improvement, Innovation, Gap Analysis, Optimization).
 
@@ -80,7 +80,7 @@ The moment your documents are ingested, ResearchHelp-AI-anaylsis-system provides
 - **Frontend Interface**: [Streamlit](https://streamlit.io/) with custom CSS / theming.
 - **Vector Database**: [ChromaDB](https://www.trychroma.com/) (Persistent local storage).
 - **AI & ML Models**:
-  - LLM Reasoning & Intent: `google/gemini-2.0-flash-001` (via OpenRouter).
+  - LLM Reasoning & Intent: `arcee-ai/trinity-large-preview:free` (via OpenRouter).
   - Embeddings: `sentence-transformers/all-mpnet-base-v2` (768-dim, locally executed).
 - **Retrieval Infrastructure**: `rank-bm25` (Okapi algorithm) + ChromaDB native similarity search.
 - **Document Parsing Suite**: `PyMuPDF (fitz)` (PDF), `python-docx` (Word), `pytesseract` + `Pillow` (Images), `pandas` (Tables).
@@ -175,15 +175,46 @@ The system relies on the following core libraries defined in `requirements.txt`:
 
 ---
 
+## 🔒 Security
+
+This project follows security best practices:
+
+- **Secrets Management**: API keys are stored in `.env` file (not committed to git)
+- **Input Sanitization**: User-provided text is sanitized before HTML rendering to prevent XSS
+- **File Validation**: File size limits (50MB) and extension validation on uploads
+- **Path Traversal Prevention**: Filenames are sanitized to prevent directory traversal attacks
+
+### Production Considerations
+
+For production deployment, consider adding:
+- Rate limiting on API calls
+- Authentication (e.g., streamlit-authenticator)
+- HTTPS/TLS encryption
+- Regular dependency updates
+
+---
+
 ## 📋 System Testing
 
-Run the comprehensive A-Z system diagnostic to verify embedding pipelines, hybrid retrieval, intent classification, and export generation:
+Run different tests based on your needs:
 
+### Quick System Diagnostic
+```bash
+python test_system.py
+```
+Verifies API connection, ChromaDB, and basic pipeline.
+
+### Full A-Z System Test
 ```bash
 python test_full_system.py
 ```
+Comprehensive test covering document ingestion, hybrid retrieval, intent classification, and export generation.
 
-This test simulates a document ingestion, tests multiple conversational intents (Direct Q&A, IEEE Gen, Off-Topic), tests formatting generations, and verifies system integrity.
+### Pipeline Integration Test
+```bash
+python test_pipeline.py
+```
+Tests the RAG pipeline components.
 
 ---
 Built with ❤️ and Python.
