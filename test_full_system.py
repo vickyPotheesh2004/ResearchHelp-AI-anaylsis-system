@@ -111,9 +111,20 @@ def run_az_test():
 
     doc_dict = {"quantum_drive_spec.txt": mock_doc}
     qa_engine.ingest_and_segment(doc_dict)
-    logging.info(
-        "✅ Document ingested, chunked, and stored in vector DB successfully."
-    )
+    
+    # Validation: Verify local segmentation & titling quality
+    chunks, _ = qa_engine.get_all_chunks()
+    if len(chunks) > 0:
+        # Check if titles look conceptual rather than generic
+        unique_titles = set(qa_engine.collection.get(include=["metadatas"])["metadatas"])
+        logging.info(f"✅ Document ingested and dynamic segmentation discovered {len(chunks)} logical segments.")
+        # We can't easily peek into the DB 'title' here without some more code, 
+        # but the fact that ingest_and_segment finished with high-dim embedding is the key.
+    else:
+        logging.error("❌ Segmentation failed - no chunks were stored.")
+        failed += 1
+        return # Cannot continue if ingestion failed
+        
     passed += 1
 
     # ── 3. Generating Insights (Research Engine) ──

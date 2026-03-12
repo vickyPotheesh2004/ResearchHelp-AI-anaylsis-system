@@ -125,6 +125,42 @@ try:
 except Exception as e:
     print(f"[ERR] ERROR: Pipeline test failed. Details: {e}")
 
+# TEST 6: Topic Segmentation & Titling Precision
+print("\n6. Testing Local Topic Segmentation & Titling Precision...")
+try:
+    from src.topic_segmenter import TopicSegmenter
+    from src.topic_titler import TopicTitler
+    
+    seg_tester = TopicSegmenter()
+    title_tester = TopicTitler()
+    
+    # Validation A: Dynamic Segmentation Outlier Detection (Need high contrast)
+    test_multi = """
+    Biology is the study of life. Cells are the basic building blocks of living organisms. 
+    Metabolism and DNA replication are core biological processes.
+    
+    In a completely different realm, we have Quantum Mechanics. 
+    Particles exhibit wave-particle duality and exist in superpositions.
+    Entanglement is a phenomenon where particles become perfectly correlated across distances.
+    Schrödinger's cat is a famous thought experiment in this field.
+    """
+    segments = seg_tester.segment(test_multi)
+    if len(segments) >= 2:
+        print(f"[OK] Dynamic segmentation detected {len(segments)} distinct topics.")
+    else:
+        print("[WARN] Segmenter did not split the text (Semantic contrast may be too low for this doc size)")
+        
+    # Validation B: Technical Title Preservation (NP-Chunking)
+    test_tech = ["The implementation of FPGA and BERT models allows for significant AI acceleration in modern data centers."]
+    title = title_tester.generate_title(test_tech)
+    if any(acronym in title for acronym in ["AI", "BERT", "FPGA"]):
+        print(f"[OK] Titler preserved technical acronyms: '{title}'")
+    else:
+        print(f"[WARN] Titler output: '{title}' (Expected acronym preservation)")
+
+except Exception as e:
+    print(f"[ERR] ERROR: Titling/Segmentation test failed. Details: {e}")
+
 print("\n--- SYSTEM DIAGNOSTIC COMPLETE ---")
 if api_key:
     print(

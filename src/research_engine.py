@@ -60,8 +60,11 @@ class ResearchEngine:
             )
             return result
         except Exception as e:
-            logger.error(f"Failed to generate document overview: {e}")
-            return f"Could not generate overview: {str(e)}"
+            error_msg = str(e)
+            logger.error(f"Failed to generate document overview: {error_msg}")
+            if "429" in error_msg:
+                return "ERROR: API_RATE_LIMIT_EXCEEDED"
+            return f"Could not generate overview: {error_msg}"
 
     def generate_auto_suggestions(
         self, all_chunks: list, all_metadata: list
@@ -107,7 +110,10 @@ class ResearchEngine:
                 return suggestions[:5]
             return []
         except Exception as e:
-            logger.error(f"Failed to generate auto suggestions: {e}")
+            error_msg = str(e)
+            logger.error(f"Failed to generate auto suggestions: {error_msg}")
+            if "429" in error_msg:
+                return ["ERROR: API_RATE_LIMIT_EXCEEDED"]
             return []
 
     def evaluate_addon_feasibility(self, proposal: str, context: str) -> str:

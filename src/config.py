@@ -50,7 +50,6 @@ INTENT_CLASSIFIER_MODEL = os.getenv(
 )
 
 # Role-specific model assignments
-TITLER_MODEL = GLM_45_AIR_MODEL      # Optimized for titling
 MERMAID_MODEL = GLM_45_AIR_MODEL     # Optimized for Mermaid rendering
 STANDARD_MODEL = GEMMA_3_12B_MODEL   # Balanced model for standard tasks
 REASONING_MODELS = [TRINITY_LARGE_MODEL, NEMOTRON_3_SUPER_MODEL]
@@ -58,8 +57,6 @@ REASONING_MODELS = [TRINITY_LARGE_MODEL, NEMOTRON_3_SUPER_MODEL]
 # ==================== LLM PARAMETERS ====================
 
 # Topic titler / generator parameters
-TOPIC_MAX_TOKENS = int(os.getenv("TOPIC_MAX_TOKENS", "10"))
-TOPIC_TEMPERATURE = float(os.getenv("TOPIC_TEMPERATURE", "0.1"))
 TOPIC_TEXT_CHUNK_SIZE = int(os.getenv("TOPIC_TEXT_CHUNK_SIZE", "500"))
 
 # Research engine parameters
@@ -105,6 +102,19 @@ TOPIC_SIMILARITY_THRESHOLD = float(
 
 # Topic segment overlap (number of sentences to overlap between segments)
 TOPIC_SEGMENT_OVERLAP = int(os.getenv("TOPIC_SEGMENT_OVERLAP", "2"))
+
+# Enhanced Topic Pipeline Settings
+# Number of sentences per segment summary (TextRank)
+TOPIC_SUMMARY_SENTENCES = int(os.getenv("TOPIC_SUMMARY_SENTENCES", "3"))
+
+# Number of keywords to extract per topic (TF-IDF)
+TOPIC_KEYWORDS_COUNT = int(os.getenv("TOPIC_KEYWORDS_COUNT", "8"))
+
+# Minimum words per segment
+TOPIC_MIN_SEGMENT_WORDS = int(os.getenv("TOPIC_MIN_SEGMENT_WORDS", "50"))
+
+# Use enhanced pipeline (zero API dependency) vs LLM-based
+USE_ENHANCED_PIPELINE = os.getenv("USE_ENHANCED_PIPELINE", "true").lower() == "true"
 
 # Intent classifier cache size
 INTENT_CACHE_MAX_SIZE = int(os.getenv("INTENT_CACHE_MAX_SIZE", "1000"))
