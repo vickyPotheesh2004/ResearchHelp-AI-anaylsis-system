@@ -83,6 +83,7 @@ def render_content_with_mermaid(content):
                         {mermaid_code}
                     </div>
                 </div>
+                <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
                 <script>
                     // Initialize mermaid with error handling
                     (function() {{
