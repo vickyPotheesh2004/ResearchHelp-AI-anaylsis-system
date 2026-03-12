@@ -25,10 +25,13 @@ CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "./chroma_db")
 # Model 1: Z.ai GLM 4.5 Air - Fast general chat (best for simple/fast tasks)
 GLM_45_AIR_MODEL = "z-ai/glm-4.5-air:free"
 
-# Model 2: Arcee AI Trinity Large Preview - Reasoning capable (best for Q&A)
+# Model 2: google/gemma-3-12b-it:free - Balanced accuracy and speed
+GEMMA_3_12B_MODEL = "google/gemma-3-12b-it:free"
+
+# Model 3: Arcee AI Trinity Large Preview - Reasoning capable (best for Q&A)
 TRINITY_LARGE_MODEL = "arcee-ai/trinity-large-preview:free"
 
-# Model 3: NVIDIA Nemotron 3 Super - Best reasoning (best for complex research)
+# Model 4: NVIDIA Nemotron 3 Super - Best reasoning (best for complex research)
 NEMOTRON_3_SUPER_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 
 # Default LLM model for general Q&A
@@ -45,6 +48,12 @@ RESEARCH_LLM_MODEL = os.getenv(
 INTENT_CLASSIFIER_MODEL = os.getenv(
     "INTENT_CLASSIFIER_MODEL", GLM_45_AIR_MODEL  # Use GLM 4.5 Air - fastest for simple task
 )
+
+# Role-specific model assignments
+TITLER_MODEL = GLM_45_AIR_MODEL      # Optimized for titling
+MERMAID_MODEL = GLM_45_AIR_MODEL     # Optimized for Mermaid rendering
+STANDARD_MODEL = GEMMA_3_12B_MODEL   # Balanced model for standard tasks
+REASONING_MODELS = [TRINITY_LARGE_MODEL, NEMOTRON_3_SUPER_MODEL]
 
 # ==================== LLM PARAMETERS ====================
 

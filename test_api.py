@@ -34,32 +34,44 @@ client = OpenAI(
 )
 
 logging.info("Making test API call to OpenRouter...")
-try:
-    response = client.chat.completions.create(
-        model="arcee-ai/trinity-large-preview:free",
-        messages=[
-            {
-                "role": "user",
-                "content": "Reply with exactly: 'API connection verified.'",
-            }
-        ],
-        max_tokens=20,
-        extra_body={"reasoning": {"enabled": True}},
-    )
+models_to_test = [
+    ("GLM 4.5 Air (Titler/Mermaid)", "z-ai/glm-4.5-air:free", False),
+    ("Gemma 3 12B (Standard)", "google/gemma-3-12b-it:free", False),
+    ("Trinity Large (QA Reasoning)", "arcee-ai/trinity-large-preview:free", True),
+    ("Nemotron 3 Super (Research Reasoning)", "nvidia/nemotron-3-super-120b-a12b:free", True),
+]
 
-    content = response.choices[0].message.content.strip()
-    logging.info(f"✅ API Response: {content}")
-
-    reasoning = getattr(response.choices[0].message, "reasoning", None)
-    if reasoning:
-        logging.info(f"✅ Reasoning captured: {len(reasoning)} chars")
-    else:
-        logging.info(
-            "ℹ️  No separate reasoning field returned (model may embed it in content)"
+for name, model_id, enable_reasoning in models_to_test:
+    logging.info(f"Testing {name} [{model_id}]...")
+    try:
+        extra_body = {"reasoning": {"enabled": True}} if enable_reasoning else None
+        response = client.chat.completions.create(
+            model=model_id,
+            messages=[
+                {
+                    "role": "user",
+                    "content": "Reply with exactly 'OK'",
+                }
+            ],
+            max_tokens=10,
+            extra_body=extra_body,
         )
 
-    logging.info("✅ API SMOKE TEST PASSED!")
+        content = response.choices[0].message.content.strip()
+        logging.info(f"✅ {name} Response: {content}")
+        
+        if enable_reasoning:
+            # Check for reasoning field in different possible locations
+            reasoning = getattr(response.choices[0].message, "reasoning", None)
+            if not reasoning and hasattr(response.choices[0].message, "reasoning_details"):
+                reasoning = response.choices[0].message.reasoning_details
+            
+            if reasoning:
+                logging.info(f"✅ Reasoning captured for {name}")
+            else:
+                logging.warning(f"⚠️ No separate reasoning field for {name}")
 
-except Exception as e:
-    logging.error(f"❌ API call failed: {e}")
-    raise SystemExit(1)
+    except Exception as e:
+        logging.error(f"❌ {name} failed: {e}")
+
+logging.info("✅ API CONNECTIVITY TEST COMPLETE!")

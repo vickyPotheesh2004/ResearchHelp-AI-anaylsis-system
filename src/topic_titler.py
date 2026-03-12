@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 from typing import List
 from src.llm_client import get_llm_client
-from src.config import TOPIC_MAX_TOKENS, TOPIC_TEMPERATURE
+from src.config import TOPIC_MAX_TOKENS, TOPIC_TEMPERATURE, TITLER_MODEL
 from src.logging_utils import get_logger
 
 load_dotenv()
@@ -14,8 +14,8 @@ class TopicTitler:
     def __init__(self):
         llm_client = get_llm_client()
         self.client = llm_client.client
-        # Use GLM 4.5 Air for fast title generation (simple task, no reasoning needed)
-        self.model = llm_client.glm_model
+        # Use optimized titler model from config
+        self.model = TITLER_MODEL
 
     def generate_title(self, texts: List[str]) -> str:
         """Uses an LLM to generate a concise, 1-2 word conceptual category for the text block."""

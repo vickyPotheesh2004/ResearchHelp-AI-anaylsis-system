@@ -14,8 +14,10 @@ from src.logging_utils import get_logger
 # Import config
 from src.config import (
     GLM_45_AIR_MODEL,
+    GEMMA_3_12B_MODEL,
     TRINITY_LARGE_MODEL,
     NEMOTRON_3_SUPER_MODEL,
+    REASONING_MODELS,
 )
 
 load_dotenv()
@@ -85,6 +87,11 @@ class LLMClient:
         return GLM_45_AIR_MODEL
     
     @property
+    def gemma_model(self) -> str:
+        """Get Gemma 3 12B model (balanced for standard tasks)."""
+        return GEMMA_3_12B_MODEL
+    
+    @property
     def trinity_model(self) -> str:
         """Get Trinity Large model (reasoning for Q&A)."""
         return TRINITY_LARGE_MODEL
@@ -122,7 +129,7 @@ class LLMClient:
         extra_body = {}
         
         # Enable reasoning for models that support it
-        if enable_reasoning and model in [TRINITY_LARGE_MODEL, NEMOTRON_3_SUPER_MODEL]:
+        if enable_reasoning and model in REASONING_MODELS:
             extra_body["reasoning"] = {"enabled": True}
         
         # Merge any additional extra_body params
@@ -153,6 +160,23 @@ class LLMClient:
             max_tokens=max_tokens,
             temperature=temperature,
             enable_reasoning=False  # No reasoning needed for simple tasks
+        )
+
+    def create_standard_completion(
+        self,
+        messages: List[Dict[str, str]],
+        max_tokens: int = 1000,
+        temperature: float = 0.3
+    ) -> Any:
+        """
+        Create a standard completion using Gemma 3 12B (balanced accuracy and speed).
+        """
+        return self.create_chat_completion(
+            model=self.gemma_model,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            enable_reasoning=False
         )
 
     def create_qa_completion(

@@ -7,6 +7,7 @@ from src.config import (
     INTENT_MAX_TOKENS,
     INTENT_TEMPERATURE,
     INTENT_TIMEOUT,
+    INTENT_CLASSIFIER_MODEL,
 )
 from src.llm_client import get_llm_client
 from src.logging_utils import get_logger
@@ -86,7 +87,7 @@ class IntentClassifier:
         llm_client = get_llm_client()
         self.client = llm_client.client
         self.llm_client = llm_client  # Use the full client for helper methods
-        self.model = llm_client.glm_model  # Use GLM 4.5 Air - fastest for simple classification
+        self.model = INTENT_CLASSIFIER_MODEL  # Use optimized model from config
         # Use OrderedDict with max size for LRU-like caching
         self._cache = OrderedDict()
         self._cache_max_size = MAX_CACHE_SIZE
