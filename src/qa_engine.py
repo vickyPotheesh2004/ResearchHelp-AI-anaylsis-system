@@ -1,6 +1,7 @@
 import json
 import atexit
 import chromadb
+import re
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
 from rank_bm25 import BM25Okapi
@@ -17,6 +18,44 @@ load_dotenv()
 
 # Get logger - this ensures logging is configured
 logger = get_logger(__name__)
+
+
+def sanitize_user_input(text: str, max_length: int = 500) -> str:
+    """Sanitize user input to prevent prompt injection attacks.
+    
+    Args:
+        text: Raw user input
+        max_length: Maximum allowed length
+        
+    Returns:
+        Sanitized text safe for LLM consumption
+    """
+    if not text:
+        return ""
+    
+    # Limit length to prevent buffer overflow attacks
+    text = text[:max_length]
+    
+    # Remove null bytes and other control characters
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+    
+    # Remove common prompt injection patterns
+    injection_patterns = [
+        r'\bignore\s+(previous|all|above)\s+(instructions?|commands?|rules?)\b',
+        r'\b(disregard|forget|ignore)\s+your\s+(system|instructions?)\b',
+        r'\byou\s+are\s+(now|actually)\s+(a|an)\s+',
+        r'<\s*script[^>]*>',
+        r'javascript:',
+        r'on\w+\s*=',  # event handlers like onclick=
+    ]
+    
+    for pattern in injection_patterns:
+        text = re.sub(pattern, '[FILTERED]', text, flags=re.IGNORECASE)
+    
+    # Escape potential prompt manipulation characters
+    text = text.replace('\u200b', '').replace('\u200c', '').replace('\u200d', '')  # Zero-width chars
+    
+    return text.strip()
 
 
 class QAEngine:
@@ -180,6 +219,13 @@ class QAEngine:
         return result
 
     def get_answer_stream(self, question, chat_history, metadata=None):
+        # Sanitize user input to prevent prompt injection
+        question = sanitize_user_input(question)
+        
+        if not question:
+            yield {"type": "done", "content": "Your question appears to be empty or invalid.", "reasoning": None}
+            return
+            
         intent_future = self._executor.submit(self._classify_intent, question)
         retrieval_future = self._executor.submit(self._retrieve_context, question)
 
@@ -277,6 +323,12 @@ class QAEngine:
         Get answer for a question using RAG pipeline.
         Includes error handling with logging for intent classification and retrieval.
         """
+        # Sanitize user input to prevent prompt injection
+        question = sanitize_user_input(question)
+        
+        if not question:
+            return {"answer": "Your question appears to be empty or invalid.", "sources": [], "intent": None}
+        
         logger.info(f"Processing question: {question[:50]}...")
         
         intent_future = self._executor.submit(self._classify_intent, question)

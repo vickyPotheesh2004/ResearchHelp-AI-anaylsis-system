@@ -22,6 +22,11 @@ except LookupError:
     nltk.download("averaged_perceptron_tagger", quiet=True)
 
 try:
+    nltk.data.find("taggers/averaged_perceptron_tagger_eng")
+except LookupError:
+    nltk.download("averaged_perceptron_tagger_eng", quiet=True)
+
+try:
     nltk.data.find("chunkers/maxent_ne_chunker")
 except LookupError:
     nltk.download("maxent_ne_chunker", quiet=True)
@@ -40,9 +45,10 @@ from nltk.corpus import wordnet
 
 # Custom academic stop-phrase list
 STOP_PHRASES = {
-    "this section discusses", "furthermore we see", "as shown in", 
-    "the results suggest", "it is clear that", "we can observe",
-    "the following table", "in this study", "related work"
+    "this segment discusses", "this section discusses", "furthermore we see", 
+    "as shown in", "the results suggest", "it is clear that", "we can observe",
+    "the following table", "in this study", "related work", "document overview",
+    "switching topics", "let us examine"
 }
 
 # Define NP Chunk grammar
@@ -77,12 +83,13 @@ class TopicTitler:
         clean_text = re.sub(r"[^a-zA-Z0-9\s\-\.]", " ", combined_text)
         tokens = word_tokenize(clean_text)
 
+        # 1. NP Chunking with enhanced extraction
+        tokens = word_tokenize(clean_text)
         if not tokens:
             return "General"
 
-        # 1. NP Chunking with enhanced extraction
+        tagged = nltk.pos_tag(tokens)
         try:
-            tagged = nltk.pos_tag(tokens)
             tree = NP_PARSER.parse(tagged)
             
             noun_phrases = []
@@ -138,48 +145,67 @@ class TopicTitler:
         except Exception as e:
             logger.warning(f"WordNet boost failed: {e}")
 
-        # 3. Final Selection with Phrase Heuristics
+        for word, tag in tagged:
+            if (word.isupper() and len(word) > 1) or (tag in ['NNP', 'NNPS']):
+                word_scores[word.lower()] += 1.0
+
         weighted_phrases = []
         for phrase in noun_phrases:
             phrase_words = phrase.lower().split()
             if not phrase_words: continue
+            if any(pw in self.stop_words for pw in phrase_words): continue
             
             # Base score from word_scores
-            phrase_score = sum(word_scores.get(w, 0) for w in phrase_words) / len(phrase_words)
+            phrase_score = sum(word_scores.get(w, 0) for w in phrase_words)
             
-            # Heuristic: Technical term detection (Preserve capitalization like 'GPU', 'BERT')
-            # If a word is mostly uppercase or starts with uppercase in original text, it might be a tech term
+            # Heuristic: Prefer longer but specific phrases
+            if len(phrase_words) > 1: phrase_score += 0.5
+            
+            # Tech weight
             for word in phrase.split():
-                if word.isupper() and len(word) > 1:
-                    phrase_score += 0.5
-                elif word[0].isupper() and word.lower() not in self.stop_words:
-                    phrase_score += 0.2
+                if word.isupper() and len(word) > 1: phrase_score += 1.5
+                elif word[0].isupper(): phrase_score += 0.5
 
-            if len(phrase_words) > 1: phrase_score *= 1.3
             weighted_phrases.append((phrase, phrase_score))
         
         weighted_phrases.sort(key=lambda x: x[1], reverse=True)
         
         if weighted_phrases:
-            best_phrase = weighted_phrases[0][0]
-            # Intelligent capitalization restorer
+            best_phrase, best_score = weighted_phrases[0]
+            
+            # Intelligent capitalization restorer & Acronym Preservation
             result_words = []
             orig_tokens = word_tokenize(combined_text)
             orig_lower = [t.lower() for t in orig_tokens]
             
             for w in best_phrase.split():
                 try:
-                    idx = orig_lower.index(w.lower())
-                    orig_case = orig_tokens[idx]
-                    # If it's an acronym or proper start, keep original case
-                    if orig_case.isupper() or (orig_case[0].isupper() and w.lower() not in self.stop_words):
+                    # Look for exact match first to capture technical casing
+                    matches = [orig_tokens[i] for i, val in enumerate(orig_lower) if val == w.lower()]
+                    
+                    # Heuristic: Pick the most "technical" looking version (most uppercase)
+                    if matches:
+                        orig_case = max(matches, key=lambda x: sum(1 for c in x if c.isupper()))
+                    else:
+                        orig_case = w
+
+                    # If it's an acronym (all caps) or proper start, keep original case
+                    # Otherwise, capitalize only if it's not a stop word
+                    if orig_case.isupper() and len(orig_case) > 1:
+                        result_words.append(orig_case)
+                    elif orig_case[0].isupper() and w.lower() not in self.stop_words:
                         result_words.append(orig_case)
                     else:
                         result_words.append(w.capitalize())
-                except ValueError:
+                except Exception:
                     result_words.append(w.capitalize())
             
-            final_title = " ".join(result_words[:3])
+            # Auto-scaling title length: 2-5 words based on phrase coherence
+            max_words = min(5, len(result_words))
+            final_title = " ".join(result_words[:max_words])
+            
+            # Remove trailing punctuation or generic filler
+            final_title = re.sub(r"[\.\s]+$", "", final_title)
             return final_title
 
         top_keywords = [w for w, _ in word_scores.most_common(2)]

@@ -1233,7 +1233,8 @@ else:
                     )
 
         user_q = st.chat_input(
-            "Ask about your documents, request suggestions, or propose research add-ons..."
+            "Ask about your documents, request suggestions, or propose research add-ons...",
+            max_chars=MAX_CHAT_INPUT_LENGTH
         )
         if user_q:
             # Validate input length

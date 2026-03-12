@@ -57,16 +57,16 @@ class TopicSegmenter:
         # Depth score measures how much a "valley" in similarity compares to its neighbors
         depth_scores = [0.0] * len(similarities)
         for i in range(len(similarities)):
-            # Look left
+            # Scan left for peak
             lpeak = similarities[i]
-            for j in range(i, -1, -1):
-                if similarities[j] > lpeak: lpeak = similarities[j]
+            for j in range(i - 1, -1, -1):
+                if similarities[j] >= lpeak: lpeak = similarities[j]
                 else: break
             
-            # Look right
+            # Scan right for peak
             rpeak = similarities[i]
-            for j in range(i, len(similarities)):
-                if similarities[j] > rpeak: rpeak = similarities[j]
+            for j in range(i + 1, len(similarities)):
+                if similarities[j] >= rpeak: rpeak = similarities[j]
                 else: break
                 
             depth_scores[i] = (lpeak - similarities[i]) + (rpeak - similarities[i])
@@ -82,13 +82,13 @@ class TopicSegmenter:
         
         # Perfection Heuristic: Sensitivity scales with document complexity
         # For very 'flat' documents, we need higher sensitivity to catch subtle shifts.
-        # For 'mountainous' documents, we only want the highest peaks.
-        sensitivity_factor = 1.0 + (0.1 if std_dev < 0.1 else 0)
+        # We also lower the threshold slightly to be more aggressive in finding boundaries.
+        sensitivity_factor = 0.8 + (0.1 if std_dev < 0.1 else 0)
         boundary_threshold = avg_depth + (sensitivity_factor * std_dev)
         
         # Minimum segment length also scales with document size (Auto-scaling)
-        # 1-2 sentences for short docs, 4-5 for very long ones
-        dynamic_min_len = max(2, min(5, len(sentences) // 15))
+        # We allow for shorter segments (minimum 1 sentence) if they are highly distinct.
+        dynamic_min_len = max(1, min(3, len(sentences) // 20))
         
         potential_boundaries = sorted(
             [(i, depth_scores[i]) for i in range(len(depth_scores)) if depth_scores[i] > boundary_threshold],
@@ -127,24 +127,21 @@ class TopicSegmenter:
                 # Dynamic start for next segment
                 start_idx = max(0, end_idx - self.overlap)
         
-        # 5. Final Cohesion Merge (Pure Analysis)
-        # If segments are too small relative to the document average, merge them
+        # 5. Final Cohesion Merge (Conservative)
         if len(topics) > 1:
-            avg_seg_words = sum(len(t['content'].split()) for t in topics) / len(topics)
-            merge_threshold = avg_seg_words * 0.4 # Minimum 40% of average size
-            
+            # Perfection Heuristic: We only merge if they are truly identical or tiny (under 10 words)
             refined_topics = []
             for t in topics:
-                if not refined_topics or len(t['content'].split()) >= merge_threshold:
+                content_words = t['content'].split()
+                if not refined_topics or len(content_words) >= 10:
                     refined_topics.append(t)
                 else:
-                    # Merge content into previous and update title to be more inclusive
+                    # Merge content into previous
                     refined_topics[-1]['content'] += " " + t['content']
                     # Re-generate title for the merged content
                     merged_sents = smart_sentence_split(refined_topics[-1]['content'])
-                    refined_topics[-1]['title'] = self.titler.generate_title(merged_sents, text)
+                    refined_topics[-1]['title'] = self.titler.generate_title(merged_sents)
             
-            # Re-index
             for i, t in enumerate(refined_topics): t['topic_id'] = i
             return refined_topics
 

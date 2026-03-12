@@ -15,6 +15,124 @@ logger = get_logger(__name__)
 # Configure Tesseract OCR path from centralized config
 pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
 
+# File signature mappings for MIME type detection (magic bytes)
+FILE_SIGNATURES = {
+    # PDF signature
+    b'%PDF': 'application/pdf',
+    # PNG signature
+    b'\x89PNG': 'image/png',
+    # JPEG signatures
+    b'\xff\xd8\xff': 'image/jpeg',
+    # DOCX (ZIP-based - PK signature)
+    b'PK\x03\x04': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    # XLSX (ZIP-based)
+    b'PK\x03\x04': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    # Text files (UTF-8 BOM)
+    b'\xef\xbb\xbf': 'text/plain',
+    # CSV typically starts with text
+}
+
+# Allowed MIME types mapping to extensions
+ALLOWED_MIME_TYPES = {
+    'application/pdf': ['pdf'],
+    'image/png': ['png'],
+    'image/jpeg': ['jpg', 'jpeg'],
+    'text/plain': ['txt'],
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['docx'],
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['xlsx'],
+    'text/csv': ['csv'],
+}
+
+
+def detect_mime_type(file_bytes: bytes) -> str:
+    """Detect MIME type from file content using magic bytes.
+    
+    Args:
+        file_bytes: Raw file bytes
+        
+    Returns:
+        Detected MIME type or 'application/octet-stream' if unknown
+    """
+    if len(file_bytes) < 4:
+        return 'application/octet-stream'
+    
+    # Check for PDF
+    if file_bytes.startswith(b'%PDF'):
+        return 'application/pdf'
+    
+    # Check for PNG
+    if file_bytes.startswith(b'\x89PNG'):
+        return 'image/png'
+    
+    # Check for JPEG
+    if file_bytes[:3] == b'\xff\xd8\xff':
+        return 'image/jpeg'
+    
+    # Check for ZIP-based formats (DOCX, XLSX)
+    if file_bytes.startswith(b'PK\x03\x04'):
+        # Try to determine specific format by checking internal structure
+        # For now, return generic ZIP - actual validation happens during processing
+        return 'application/zip'
+    
+    # Check for text (UTF-8 BOM)
+    if file_bytes.startswith(b'\xef\xbb\xbf'):
+        return 'text/plain'
+    
+    # Try to decode as text
+    try:
+        file_bytes[:1000].decode('utf-8')
+        return 'text/plain'
+    except UnicodeDecodeError:
+        pass
+    
+    return 'application/octet-stream'
+
+
+def validate_mime_type(file_bytes: bytes, expected_ext: str) -> Tuple[bool, str]:
+    """Validate that file content matches expected MIME type based on extension.
+    
+    Args:
+        file_bytes: Raw file bytes
+        expected_ext: Expected file extension
+        
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    detected_mime = detect_mime_type(file_bytes)
+    
+    # Map extension to expected MIME type
+    ext_to_mime = {
+        'pdf': 'application/pdf',
+        'png': 'image/png',
+        'jpg': 'image/jpeg',
+        'jpeg': 'image/jpeg',
+        'txt': 'text/plain',
+        'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'csv': 'text/csv',
+    }
+    
+    expected_mime = ext_to_mime.get(expected_ext.lower())
+    
+    if not expected_mime:
+        return False, f"Unknown file extension: {expected_ext}"
+    
+    # Special handling for ZIP-based formats (docx, xlsx)
+    if expected_ext.lower() in ['docx', 'xlsx']:
+        if detected_mime == 'application/zip' or detected_mime.startswith('application/vnd.openxmlformats'):
+            return True, ""
+        return False, f"File content does not match {expected_ext} format"
+    
+    # For other formats, check exact match
+    if detected_mime == expected_mime:
+        return True, ""
+    
+    # Special case: text/csv vs text/plain - both acceptable
+    if detected_mime == 'text/plain' and expected_mime in ['text/plain', 'text/csv']:
+        return True, ""
+    
+    return False, f"File content ({detected_mime}) does not match expected type ({expected_mime})"
+
 
 def extract_image_text(image_bytes: bytes) -> str:
     """Extract text from image using OCR."""
@@ -64,6 +182,11 @@ def process_file(uploaded_file) -> Tuple[str, str]:
 
     # Validate file size
     is_valid, error_msg = validate_file_size(file_bytes)
+    if not is_valid:
+        return filename, error_msg
+    
+    # Validate MIME type to prevent extension spoofing
+    is_valid, error_msg = validate_mime_type(file_bytes, ext)
     if not is_valid:
         return filename, error_msg
 
