@@ -154,6 +154,14 @@ OPENROUTER_BASE_URL = os.getenv(
     "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
 )
 
+# OpenRouter site identification (used for rankings on openrouter.ai)
+OPENROUTER_SITE_URL = os.getenv(
+    "OPENROUTER_SITE_URL", "https://github.com"
+)
+OPENROUTER_SITE_TITLE = os.getenv(
+    "OPENROUTER_SITE_TITLE", "ResearchHelp AI Analysis System"
+)
+
 # ==================== VALIDATION ====================
 
 

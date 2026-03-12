@@ -163,8 +163,8 @@ class TopicTitler:
             
             # Tech weight
             for word in phrase.split():
-                if word.isupper() and len(word) > 1: phrase_score += 1.5
-                elif word[0].isupper(): phrase_score += 0.5
+                if word.isupper() and len(word) > 1: phrase_score += 2.0 # Increased boost
+                elif word[0].isupper(): phrase_score += 0.8 # Increased boost
 
             weighted_phrases.append((phrase, phrase_score))
         
@@ -201,8 +201,12 @@ class TopicTitler:
                     result_words.append(w.capitalize())
             
             # Auto-scaling title length: 2-5 words based on phrase coherence
+            # But ensure we don't truncate a short valid technical phrase
             max_words = min(5, len(result_words))
-            final_title = " ".join(result_words[:max_words])
+            if len(result_words) <= 5:
+                final_title = " ".join(result_words)
+            else:
+                final_title = " ".join(result_words[:max_words])
             
             # Remove trailing punctuation or generic filler
             final_title = re.sub(r"[\.\s]+$", "", final_title)

@@ -27,7 +27,7 @@ def sanitize_filename(filename: str) -> str:
     # Remove any special characters except alphanumeric, underscore, hyphen, and dot
     filename = re.sub(r"[^\w\s.-]", "", filename)
     # Limit filename length
-    max_length = 50
+    max_length = 200
     if len(filename) > max_length:
         name, ext = os.path.splitext(filename)
         filename = name[: max_length - len(ext)] + ext
@@ -60,46 +60,62 @@ def render_content_with_mermaid(content):
     if len(parts) == 1:
         st.markdown(clean_content)
     else:
+        mermaid_count = 0
         for i, part in enumerate(parts):
             if i % 2 == 0:
                 text = part.strip()
                 if text:
                     st.markdown(text)
             else:
+                mermaid_count += 1
                 mermaid_code = part.strip().replace("`", "'")
-                # Remove common characters that break Mermaid labels if not perfect
+                # Remove characters that break Mermaid labels
                 mermaid_code = re.sub(r'[(){}\[\]]', '', mermaid_code)
+                # Sanitize the mermaid code to prevent XSS
+                mermaid_code = mermaid_code.replace("<", "&lt;").replace(">", "&gt;")
+                
+                # Use a unique ID for each mermaid diagram
+                mermaid_id = f"mermaid-diagram-{mermaid_count}"
+                
                 html = f"""
-                <div style="background:#ffffff; border:1px solid #e0e0e0; border-radius:12px; padding:20px; margin:12px 0; text-align:center;">
-                    <div class="mermaid" style="display:flex; justify-content:center; min-height: 200px;">
+                <div style="background:#ffffff; border:1px solid #e0e0e0; border-radius:12px; padding:20px; margin:12px 0; text-align:center; overflow-x: auto;">
+                    <div id="{mermaid_id}" class="mermaid" style="display:flex; justify-content:center; min-height: 150px; overflow-x: auto;">
                         {mermaid_code}
                     </div>
                 </div>
-                <script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.0/dist/mermaid.min.js"></script>
                 <script>
-                    try {{
-                        mermaid.initialize({{
-                            startOnLoad: true,
-                            theme: 'default',
-                            flowchart: {{ curve: 'basis', padding: 20 }},
-                            securityLevel: 'loose',
-                            suppressErrorIndicators: false
-                        }});
-                    }} catch (e) {{
-                        console.error('Mermaid init error:', e);
-                    }}
+                    // Initialize mermaid with error handling
+                    (function() {{
+                        if (typeof mermaid !== 'undefined') {{
+                            mermaid.initialize({{
+                                startOnLoad: true,
+                                theme: 'default',
+                                flowchart: {{ curve: 'basis', padding: 20 }},
+                                securityLevel: 'strict',
+                                suppressErrorIndicators: true
+                            }});
+                        }}
+                    }})();
                 </script>
                 """
-                components.html(html, height=500, scrolling=True)
+                try:
+                    components.html(html, height=300, scrolling=True)
+                except Exception as e:
+                    # Fallback: show the mermaid code as preformatted text
+                    st.warning("Diagram rendering failed. Showing code instead:")
+                    st.code(mermaid_code, language="mermaid")
 
     for img_prompt in images:
-        encoded = urllib.parse.quote(img_prompt.strip())
-        image_url = f"https://image.pollinations.ai/prompt/{encoded}?width=800&height=400&nologo=true"
-        st.image(
-            image_url,
-            caption="AI Generated Visualization",
-            use_container_width=True,
-        )
+        try:
+            encoded = urllib.parse.quote(img_prompt.strip())
+            image_url = f"https://image.pollinations.ai/prompt/{encoded}?width=800&height=400&nologo=true"
+            st.image(
+                image_url,
+                caption="AI Generated Visualization",
+                use_container_width=True,
+            )
+        except Exception as e:
+            st.warning(f"Could not generate image: {str(e)}")
 
 
 def _clean_for_speech(text):
@@ -199,12 +215,17 @@ def render_voice_controller():
                 }}
             }}
             
-            // High-frequency polling (Every 200ms) to ensure mic never disappears
-            if (WinParent) {{
-                clearInterval(WinParent.docmindMicInterval);
-                WinParent.docmindMicInterval = setInterval(injectButtons, 200);
+            // Lower-frequency polling (Every 1000ms) to reduce conflicts with scrolling
+            // Only inject if mic button is missing and avoid interfering with user interactions
+            if (WinParent && !WinParent.docmindMicInterval) {{
+                WinParent.docmindMicInterval = setInterval(injectButtons, 1000);
                 injectButtons();
                 console.log("ResearchHelp-AI-anaylsis-system: Voice controller self-healing active.");
+            }}
+            // Stop polling once button is injected to save resources
+            if (WinParent && WinParent.document.querySelector('.voice-btn-mic')) {{
+                clearInterval(WinParent.docmindMicInterval);
+                WinParent.docmindMicInterval = null;
             }}
         </script>
     </div>
@@ -290,6 +311,43 @@ if not is_valid:
 CUSTOM_CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* Smooth scrolling for the entire app */
+html {
+    scroll-behavior: smooth;
+}
+
+/* Fix for scroll breaking - ensure smooth scrolling */
+[data-testid="stAppViewContainer"] {
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Prevent layout shifts during loading */
+.stMarkdown, .stMarkdown p {
+    overflow-wrap: break-word;
+}
+
+/* Fix for expanders - smooth expand/collapse */
+.streamlit-expanderHeader {
+    transition: background-color 0.2s ease;
+}
+
+/* Fix for chat message rendering */
+[data-testid="chat-message-container"] {
+    transition: opacity 0.1s ease;
+}
+
+/* Prevent horizontal scroll breaking */
+div[data-testid="stMarkdownContainer"] {
+    overflow-x: hidden;
+}
+
+/* Fix for source cards scrolling */
+.source-card {
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+}
 
 [data-testid="stAppViewContainer"] {
     font-family: 'Inter', sans-serif;
@@ -1257,7 +1315,9 @@ else:
             with st.chat_message("assistant"):
                 stream_meta = {}
                 final_data = {}
-                response_placeholder = st.empty()
+                
+                # Use a container for streaming to reduce re-renders
+                response_container = st.container()
                 streamed_text = ""
 
                 # Pass IEEE metadata to the engine
@@ -1278,12 +1338,16 @@ else:
                         )
                     elif event["type"] == "token":
                         streamed_text += event["token"]
-                        response_placeholder.markdown(streamed_text + "▌")
+                        # Update the container instead of using empty() to reduce re-renders
+                        with response_container:
+                            st.markdown(streamed_text + "▌")
                     elif event["type"] == "done":
                         final_data = event
 
                 final_content = final_data.get("content", streamed_text)
-                response_placeholder.empty()
+                # Clear the streaming placeholder
+                response_container.empty()
+                # Render final content
                 render_content_with_mermaid(final_content)
                 speak_text(final_content, "stream_latest")
 

@@ -83,7 +83,9 @@ class TopicSegmenter:
         # Perfection Heuristic: Sensitivity scales with document complexity
         # For very 'flat' documents, we need higher sensitivity to catch subtle shifts.
         # We also lower the threshold slightly to be more aggressive in finding boundaries.
-        sensitivity_factor = 0.8 + (0.1 if std_dev < 0.1 else 0)
+        sensitivity_factor = 0.7  # More aggressive than 0.8
+        if std_dev < 0.05: sensitivity_factor = 0.5 # Extreme sensitivity for flat coherence
+        
         boundary_threshold = avg_depth + (sensitivity_factor * std_dev)
         
         # Minimum segment length also scales with document size (Auto-scaling)
@@ -129,18 +131,19 @@ class TopicSegmenter:
         
         # 5. Final Cohesion Merge (Conservative)
         if len(topics) > 1:
-            # Perfection Heuristic: We only merge if they are truly identical or tiny (under 10 words)
+            # Perfection Heuristic: We only merge if they are truly identical or tiny (under 15 words)
+            # and the titles are semantically similar.
             refined_topics = []
             for t in topics:
                 content_words = t['content'].split()
-                if not refined_topics or len(content_words) >= 10:
+                if not refined_topics or len(content_words) >= 15:
                     refined_topics.append(t)
                 else:
                     # Merge content into previous
                     refined_topics[-1]['content'] += " " + t['content']
                     # Re-generate title for the merged content
                     merged_sents = smart_sentence_split(refined_topics[-1]['content'])
-                    refined_topics[-1]['title'] = self.titler.generate_title(merged_sents)
+                    refined_topics[-1]['title'] = self.titler.generate_title(merged_sents, refined_topics[-1]['content'])
             
             for i, t in enumerate(refined_topics): t['topic_id'] = i
             return refined_topics

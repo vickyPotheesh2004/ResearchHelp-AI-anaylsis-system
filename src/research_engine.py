@@ -64,6 +64,8 @@ class ResearchEngine:
             logger.error(f"Failed to generate document overview: {error_msg}")
             if "429" in error_msg:
                 return "ERROR: API_RATE_LIMIT_EXCEEDED"
+            if "404" in error_msg:
+                return f"🚫 **OpenRouter Privacy Error**: {error_msg}\n\n**FIX**: Go to [OpenRouter Privacy Settings](https://openrouter.ai/settings/privacy) and enable **'Allow Data Retention'** for free models."
             return f"Could not generate overview: {error_msg}"
 
     def generate_auto_suggestions(
@@ -93,11 +95,18 @@ class ResearchEngine:
             )
             raw = response.choices[0].message.content.strip()
 
-            start_idx = raw.find("[")
-            end_idx = raw.rfind("]")
+            # Skip the [Reasoning Mode] header if it exists
+            if raw.startswith("> [Reasoning Mode]"):
+                json_search_start = raw.find("\n\n")
+                raw_to_search = raw[json_search_start:] if json_search_start != -1 else raw[18:]
+            else:
+                raw_to_search = raw
+
+            start_idx = raw_to_search.find("[")
+            end_idx = raw_to_search.rfind("]")
 
             if start_idx != -1 and end_idx != -1:
-                raw = raw[start_idx : end_idx + 1]
+                raw = raw_to_search[start_idx : end_idx + 1]
 
             try:
                 suggestions = json.loads(raw)

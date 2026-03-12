@@ -25,6 +25,10 @@ load_dotenv()
 # Get logger - this ensures logging is configured
 logger = get_logger(__name__)
 
+# OpenRouter site identification for ranking
+OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL", "https://github.com")
+OPENROUTER_SITE_TITLE = os.getenv("OPENROUTER_SITE_TITLE", "ResearchHelp AI Analysis System")
+
 
 class LLMClient:
     """
@@ -126,6 +130,11 @@ class LLMClient:
         Returns:
             Chat completion response
         """
+        extra_headers = {
+            "HTTP-Referer": OPENROUTER_SITE_URL,
+            "X-OpenRouter-Title": OPENROUTER_SITE_TITLE,
+        }
+        
         extra_body = {}
         
         # Enable reasoning for models that support it
@@ -136,14 +145,40 @@ class LLMClient:
         if "extra_body" in kwargs:
             extra_body.update(kwargs.pop("extra_body"))
         
-        return self.client.chat.completions.create(
-            model=model,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            extra_body=extra_body if extra_body else None,
-            **kwargs
-        )
+        try:
+            response = self.client.chat.completions.create(
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                extra_headers=extra_headers,
+                extra_body=extra_body if extra_body else None,
+                **kwargs
+            )
+            
+            # Post-process for reasoning models that might return null content but valid reasoning
+            message = response.choices[0].message
+            if not getattr(message, "content", None):
+                reasoning = getattr(message, "reasoning", None)
+                if not reasoning and hasattr(message, "reasoning_details"):
+                    reasoning = message.reasoning_details
+                
+                if reasoning:
+                    logger.info(f"Model {model} returned reasoning without content. Using reasoning as content.")
+                    message.content = f"> [Reasoning Mode]\n\n{reasoning}"
+            
+            return response
+
+        except Exception as e:
+            error_str = str(e)
+            if "404" in error_str and "guardrail" in error_str.lower():
+                logger.error(f"OpenRouter Guardrail/Data Policy 404 Error: {error_str}")
+                raise Exception(
+                    "OpenRouter API Error (404): No endpoints available matching your privacy settings.\n"
+                    "FIX: Go to https://openrouter.ai/settings/privacy and set 'Allow Data Retention' to ENABLED "
+                    "to use free models, or add credits to your account."
+                )
+            raise e
 
     def create_fast_completion(
         self,
@@ -229,6 +264,75 @@ class LLMClient:
             max_tokens=max_tokens,
             temperature=temperature,
             enable_reasoning=False  # No reasoning needed for simple diagrams
+        )
+
+    def create_vision_completion(
+        self,
+        text: str,
+        image_url: str,
+        max_tokens: int = 1000,
+        temperature: float = 0.3
+    ) -> Any:
+        """
+        Create a vision/image understanding completion using Gemma 3 12B.
+        Gemma 3 12B supports multimodal inputs (text + images).
+        
+        Args:
+            text: The text prompt/question about the image
+            image_url: URL of the image to analyze
+            max_tokens: Max tokens to generate
+            temperature: Sampling temperature
+            
+        Returns:
+            Chat completion response with image understanding
+        """
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": text},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": image_url}
+                    }
+                ]
+            }
+        ]
+        
+        return self.create_chat_completion(
+            model=self.gemma_model,  # Use Gemma 3 12B for vision
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            enable_reasoning=False
+        )
+
+    def create_reasoning_completion(
+        self,
+        messages: List[Dict[str, str]],
+        max_tokens: int = 2000,
+        temperature: float = 0.25,
+        use_nemotron: bool = False
+    ) -> Any:
+        """
+        Create a reasoning-focused completion using Trinity or Nemotron.
+        
+        Args:
+            messages: Chat messages
+            max_tokens: Max tokens to generate
+            temperature: Sampling temperature
+            use_nemotron: If True, use Nemotron (best reasoning), otherwise Trinity
+            
+        Returns:
+            Chat completion response with reasoning details
+        """
+        model = self.nemotron_model if use_nemotron else self.trinity_model
+        return self.create_chat_completion(
+            model=model,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            enable_reasoning=True  # Enable reasoning for both models
         )
 
 
