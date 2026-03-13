@@ -12,6 +12,7 @@ from src.extractor import process_file
 from src.qa_engine import QAEngine
 from src.config import validate_config
 from src.logging_utils import setup_logging
+from src.mermaid_renderer import MermaidCleaner, MermaidValidator, MERMAID_HTML_TEMPLATE, MERMAID_CDN
 
 # Initialize logging at application startup
 setup_logging()
@@ -45,102 +46,119 @@ def sanitize_for_markdown(text: str) -> str:
     return text
 
 
-def render_content_with_mermaid(content):
-    import urllib.parse
+def render_content_with_mermaid(content: str) -> None:
+    """
+    DROP-IN REPLACEMENT for the existing render_content_with_mermaid() in app.py.
 
-    image_pattern = re.compile(
-        r"<image_prompt>(.*?)</image_prompt>", re.DOTALL
-    )
-    images = image_pattern.findall(content)
-    clean_content = image_pattern.sub("", content)
+    Finds all Mermaid code blocks in the LLM response, cleans and validates
+    each one, then renders them inline using Mermaid.js via Streamlit components.
+    Non-Mermaid text is rendered as standard Markdown.
 
-    mermaid_pattern = re.compile(r"```mermaid\s*(.*?)```", re.DOTALL)
-    parts = mermaid_pattern.split(clean_content)
+    Parameters
+    ----------
+    content : str
+        The full LLM response string, which may contain ```mermaid ... ``` blocks
+        mixed with regular Markdown text.
+    """
+    import streamlit as st
+    import streamlit.components.v1 as components
+    import json
+    import uuid
 
-    if len(parts) == 1:
-        st.markdown(clean_content)
-    else:
-        # Collect all mermaid diagrams first
-        mermaid_diagrams = []
-        text_parts = []
-        for i, part in enumerate(parts):
-            if i % 2 == 0:
-                text_parts.append(part.strip())
+    # Split content on ```mermaid ... ``` boundaries
+    # Produces alternating [text, mermaid_code, text, mermaid_code, ...] segments
+    parts = re.split(r"(```(?:mermaid)?\s*\n.*?```)", content, flags=re.DOTALL | re.IGNORECASE)
+
+    # Inject Mermaid CDN once per session
+    if "mermaid_cdn_injected" not in st.session_state:
+        components.html(MERMAID_CDN, height=0)
+        st.session_state["mermaid_cdn_injected"] = True
+
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+
+        # Detect if this segment is a mermaid block
+        is_mermaid = bool(re.match(r"^```(?:mermaid)?", part, re.IGNORECASE))
+
+        if is_mermaid:
+            # Extract raw code (strip fences)
+            raw_code = re.sub(r"^```(?:mermaid)?\s*\n?", "", part, flags=re.IGNORECASE)
+            raw_code = re.sub(r"\n?```\s*$", "", raw_code)
+
+            # Clean the code
+            cleaned = MermaidCleaner.clean(raw_code)
+
+            # Validate
+            is_valid, error_msg = MermaidValidator.validate(cleaned)
+
+            if not is_valid:
+                # Show clean error with the fixed code so the user can see what went wrong
+                st.warning(f"⚠️ Diagram syntax issue: {error_msg}")
+                with st.expander("Show diagram code"):
+                    st.code(cleaned, language="text")
             else:
-                mermaid_diagrams.append(part.strip())
+                # Render the diagram
+                div_id = f"mermaid-div-{uuid.uuid4().hex[:8]}"
+                escaped = json.dumps(cleaned)   # safe JS string escaping
 
-        # Render text parts
-        for text in text_parts:
-            if text:
-                st.markdown(text, unsafe_allow_html=True)
+                html = MERMAID_HTML_TEMPLATE.format(
+                    div_id=div_id,
+                    escaped_code=escaped,
+                )
+                # height auto-sizes; 400 is a safe default for most diagrams
+                components.html(html, height=400, scrolling=False)
 
-        # If we have mermaid diagrams, render them with proper initialization
-        if mermaid_diagrams:
-            # Create unique IDs for all diagrams
-            diagram_html = ""
-            for idx, mermaid_code in enumerate(mermaid_diagrams, 1):
-                # Sanitize the mermaid code - but keep it valid for mermaid
-                safe_code = mermaid_code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                diagram_id = f"mermaid-diagram-{idx}"
-                diagram_html += f"""
-                <div id="{diagram_id}" class="mermaid" style="display:flex; justify-content:center; min-height: 150px; padding: 20px;">
-                    {safe_code}
-                </div>
-                """
+                # Also show code in expander for copy/debug
+                with st.expander("View diagram code", expanded=False):
+                    st.code(cleaned, language="text")
 
-            # Full HTML with mermaid library loaded once and proper initialization
-            html = f"""
-            <div style="background:#ffffff; border:1px solid #e0e0e0; border-radius:12px; padding:20px; margin:12px 0; text-align:center; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-                {diagram_html}
-            </div>
-            <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-            <script>
-                // Wait for mermaid to load and initialize
-                window.addEventListener('load', function() {{
-                    if (typeof mermaid !== 'undefined') {{
-                        mermaid.initialize({{
-                            startOnLoad: false,
-                            theme: 'default',
-                            flowchart: {{ curve: 'basis', padding: 20 }},
-                            securityLevel: 'loose'
-                        }});
-                        // Use mermaid.run() to render all diagrams on the page
-                        mermaid.run();
-                    }} else {{
-                        // Retry after a short delay if mermaid isn't loaded yet
-                        setTimeout(function() {{
-                            if (typeof mermaid !== 'undefined') {{
-                                mermaid.initialize({{
-                                    startOnLoad: false,
-                                    theme: 'default',
-                                    flowchart: {{ curve: 'basis', padding: 20 }},
-                                    securityLevel: 'loose'
-                                }});
-                                mermaid.run();
-                            }}
-                        }}, 500);
-                    }}
-                }});
-            </script>
-            """
-            try:
-                components.html(html, height=500, scrolling=True)
-            except Exception as e:
-                # Fallback to code block if rendering fails
-                for mermaid_code in mermaid_diagrams:
-                    st.code(mermaid_code, language="mermaid")
+        else:
+            # Regular Markdown text — render as normal
+            st.markdown(part)
 
-    for img_prompt in images:
-        try:
-            encoded = urllib.parse.quote(img_prompt.strip())
-            image_url = f"https://image.pollinations.ai/prompt/{encoded}?width=800&height=400&nologo=true"
-            st.image(
-                image_url,
-                caption="AI Generated Visualization",
-                use_container_width=True,
-            )
-        except Exception as e:
-            st.warning(f"Could not generate image: {str(e)}")
+
+def render_confidence_badge(confidence: dict) -> None:
+    """
+    Renders a colour-coded confidence percentage badge right-aligned
+    below the user's question bubble.
+
+    Score bands → colours:
+        85–100  Very High  →  Green   #22c55e
+        65–84   High       →  Blue    #3b82f6
+        45–64   Moderate   →  Amber   #f59e0b
+        25–44   Low        →  Orange  #f97316
+        0–24    Very Low   →  Red     #ef4444
+
+    Hovering the badge shows the reason tooltip.
+    """
+    score  = confidence.get("score", 50)
+    level  = confidence.get("level", "Moderate")
+    reason = confidence.get("reason", "")
+
+    colour_map = {
+        "Very High": "#22c55e",
+        "High":      "#3b82f6",
+        "Moderate":  "#f59e0b",
+        "Low":       "#f97316",
+        "Very Low":  "#ef4444",
+    }
+    colour = colour_map.get(level, "#94a3b8")
+
+    badge_html = f"""
+    <div class="confidence-wrapper">
+        <span
+            class="confidence-badge"
+            style="background-color: {colour};"
+            title="Confidence: {level} — {reason}"
+        >
+            <strong>{score}%</strong>
+        </span>
+        <span class="confidence-label">AI Confidence</span>
+    </div>
+    """
+    st.markdown(badge_html, unsafe_allow_html=True)
 
 
 def _clean_for_speech(text):
@@ -536,6 +554,43 @@ div[data-testid="stMarkdownContainer"] {
 .stDownloadButton > button:hover {
     background: linear-gradient(135deg, #4a45a0, #302b63) !important;
     box-shadow: 0 4px 12px rgba(74, 69, 160, 0.3) !important;
+}
+
+/* Confidence Badge Styles */
+.confidence-wrapper {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 6px;
+    margin-top: -8px;
+    margin-bottom: 6px;
+}
+
+.confidence-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    color: #ffffff;
+    font-size: 0.85rem;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+    cursor: help;
+    user-select: none;
+    white-space: nowrap;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.18);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.confidence-badge:hover {
+    transform: scale(1.07);
+    box-shadow: 0 3px 8px rgba(0,0,0,0.22);
+}
+
+.confidence-label {
+    font-size: 0.70rem;
+    color: #94a3b8;
+    font-style: italic;
+    letter-spacing: 0.02em;
 }
 </style>
 """
@@ -1269,6 +1324,11 @@ else:
                 render_content_with_mermaid(msg["content"])
                 if msg["role"] == "assistant":
                     speak_text(msg["content"], f"hist_{id(msg)}")
+                
+                # Render confidence badge for user messages that have confidence
+                if msg.get("confidence") and msg["role"] == "user":
+                    render_confidence_badge(msg["confidence"])
+                
                 if msg.get("sources") and msg["role"] == "assistant":
                     with st.expander(
                         f"📚 Sources Referenced ({len(msg['sources'])})"
@@ -1340,6 +1400,7 @@ else:
             with st.chat_message("assistant"):
                 stream_meta = {}
                 final_data = {}
+                confidence_result = None  # Store confidence for user message
                 
                 # Use a container for streaming to reduce re-renders
                 response_container = st.container()
@@ -1361,6 +1422,8 @@ else:
                             f'<div class="intent-badge {intent_class}">{intent.get("emoji", "📄")} {intent.get("label", "Document Q&A")}</div>',
                             unsafe_allow_html=True,
                         )
+                        # Store confidence from meta event
+                        confidence_result = event.get("confidence")
                     elif event["type"] == "token":
                         streamed_text += event["token"]
                         # Update the container instead of using empty() to reduce re-renders
@@ -1435,6 +1498,16 @@ else:
                     "reasoning_details": final_data.get("reasoning"),
                     "intent": stream_meta.get("intent"),
                     "sources": stream_meta.get("sources", []),
+                    "confidence": confidence_result,
                 }
             )
+            
+            # Update the last user message with confidence
+            if confidence_result and len(st.session_state.chat_history) > 1:
+                st.session_state.chat_history[-2]["confidence"] = confidence_result
+            
+            # Render confidence badge below user question
+            if confidence_result:
+                render_confidence_badge(confidence_result)
+            
             st.rerun()

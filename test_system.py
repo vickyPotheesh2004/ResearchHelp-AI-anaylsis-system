@@ -161,6 +161,56 @@ try:
 except Exception as e:
     print(f"[ERR] ERROR: Titling/Segmentation test failed. Details: {e}")
 
+# TEST 7: Confidence Scorer
+print("\n7. Testing Confidence Scorer...")
+try:
+    from unittest.mock import Mock
+    from src.confidence_scorer import ConfidenceScorer
+    
+    # Create mock LLM client
+    mock_llm_client = Mock()
+    mock_response = Mock()
+    mock_response.choices = [Mock()]
+    mock_response.choices[0].message.content = '{"score": 85, "level": "Very High", "reason": "Direct answer found in multiple chunks."}'
+    mock_llm_client.create_fast_completion.return_value = mock_response
+    
+    # Initialize scorer
+    scorer = ConfidenceScorer(mock_llm_client)
+    
+    # Test scoring
+    result = scorer.score_confidence(
+        user_question="What is machine learning?",
+        intent="document_qa",
+        domain="AI",
+        context_chunks=[
+            "Machine learning is a subset of artificial intelligence.",
+            "ML enables computers to learn from data without explicit programming."
+        ]
+    )
+    
+    # Verify results
+    if result.get("score") == 85 and result.get("level") == "Very High":
+        print(f"[OK] Confidence Scorer working! Score: {result['score']}, Level: {result['level']}")
+    else:
+        print(f"[WARN] Unexpected result: {result}")
+    
+    # Test fallback on error
+    mock_llm_client.create_fast_completion.side_effect = Exception("API Error")
+    fallback_result = scorer.score_confidence(
+        user_question="Test?",
+        intent="document_qa",
+        domain="Test",
+        context_chunks=["test"]
+    )
+    
+    if fallback_result == ConfidenceScorer.FALLBACK:
+        print("[OK] Fallback mechanism working correctly.")
+    else:
+        print(f"[WARN] Fallback not working as expected: {fallback_result}")
+        
+except Exception as e:
+    print(f"[ERR] ERROR: Confidence Scorer test failed. Details: {e}")
+
 print("\n--- SYSTEM DIAGNOSTIC COMPLETE ---")
 if api_key:
     print(

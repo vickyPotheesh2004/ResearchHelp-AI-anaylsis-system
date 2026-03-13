@@ -19,7 +19,13 @@ DOCUMENT_QA_PROMPT = (
     "8. If the question asks about a process or workflow, break it into numbered steps.\n"
     "9. End with a '## Key Takeaways' section with 3-5 bullet points summarizing the most important findings.\n"
     "10. Finally, suggest 2-3 'Expected Follow-up Questions' in plain text as separate lines.\n"
-    "11. GENERATING IMAGES: If prompted for an image, use `<image_prompt>...</image_prompt>` tags."
+    "11. GENERATING IMAGES: If prompted for an image, use `<image_prompt>...</image_prompt>` tags.\n\n"
+    "MERMAID DIAGRAM RULES - FOLLOW EXACTLY OR DIAGRAM WILL BREAK:\n"
+    "- FIRST LINE must be: flowchart TD, graph LR, or sequenceDiagram (NOT flowChart, flowChart, flowchart alone)\.\n"
+    "- NODE LABELS: Use A[Label] not A[Label: with colon], B{\"quoted\"} not B[\"quoted\"], C(Parens) not C(Parens:with:colons)\.\n"
+    "- ARROWS: Use --> not ->, ==> not =>, and never use unicode arrows like → or ⇒\.\n"
+    "- Always close subgraphs with 'end'\.\n"
+    "- Test your diagram: if a label has colon, quote, or angle bracket - fix it before outputting\.\n"
 )
 
 SUGGESTION_PROMPT = (
@@ -47,7 +53,13 @@ SUGGESTION_PROMPT = (
     "5. NEVER start with 'Based on the provided text'. Start directly.\n"
     "6. Cite sources using [Source: filename | Topic: topic_name].\n"
     "6. AT THE VERY END of your entire response, provide exactly 3 expected follow-up questions the user might ask next, based on your current answer. These 3 questions MUST be simple plain text. DO NOT use bold, italics, lists, markdown boxes, or any extra design. Just write the 3 questions as plain sentences on separate lines.\n"
-    "7. GENERATING IMAGES: If the suggestion requires a visual concept, include a highly detailed image prompt enclosed in `<image_prompt>...</image_prompt>` tags."
+    "7. GENERATING IMAGES: If the suggestion requires a visual concept, include a highly detailed image prompt enclosed in `<image_prompt>...</image_prompt>` tags.\n\n"
+    "MERMAID DIAGRAM RULES - FOLLOW EXACTLY OR DIAGRAM WILL BREAK:\n"
+    "- FIRST LINE must be: flowchart TD, graph LR, or sequenceDiagram (NOT flowChart, flowChart, flowchart alone)\.\n"
+    "- NODE LABELS: Use A[Label] not A[Label: with colon], B{\"quoted\"} not B[\"quoted\"], C(Parens) not C(Parens:with:colons)\.\n"
+    "- ARROWS: Use --> not ->, ==> not =>, and never use unicode arrows like → or ⇒\.\n"
+    "- Always close subgraphs with 'end'\.\n"
+    "- Test your diagram: if a label has colon, quote, or angle bracket - fix it before outputting\.\n"
 )
 
 RESEARCH_ADDON_PROMPT = (
@@ -75,7 +87,13 @@ RESEARCH_ADDON_PROMPT = (
     "- Include a Mermaid diagram (```mermaid) of the PhD Research Flow. Wrap labels in double quotes.\n"
     "- Generate a detailed `<image_prompt>` for visual/system components.\n\n"
     "Citations: Use [Source: filename | Topic: topic_name].\n"
-    "Ending: Provide exactly 3 plain text follow-up questions at the very end."
+    "Ending: Provide exactly 3 plain text follow-up questions at the very end.\n\n"
+    "MERMAID DIAGRAM RULES - FOLLOW EXACTLY OR DIAGRAM WILL BREAK:\n"
+    "- FIRST LINE must be: flowchart TD, graph LR, or sequenceDiagram (NOT flowChart, flowChart, flowchart alone)\.\n"
+    "- NODE LABELS: Use A[Label] not A[Label: with colon], B{\"quoted\"} not B[\"quoted\"], C(Parens) not C(Parens:with:colons)\.\n"
+    "- ARROWS: Use --> not ->, ==> not =>, and never use unicode arrows like → or ⇒\.\n"
+    "- Always close subgraphs with 'end'\.\n"
+    "- Test your diagram: if a label has colon, quote, or angle bracket - fix it before outputting\.\n"
 )
 
 SIMPLE_RESEARCH_PROMPT = (
@@ -123,7 +141,11 @@ OFF_TOPIC_PROMPT = (
     "   > 🚫 This question falls outside the scope of the uploaded documents.\n\n"
     "   I am specialized in the provided research material. Here is what I can help with:\n"
     "   - [Suggestion 1]\n"
-    "   - [Suggestion 2]"
+    "   - [Suggestion 2]\n\n"
+    "MERMAID DIAGRAM RULES:\n"
+    "- Use flowchart TD or graph LR\.\n"
+    "- Node labels: A[Label] not A[Label: colon]\.\n"
+    "- Arrows: --> not -> or ⇒\.\n"
 )
 
 DOCUMENT_OVERVIEW_PROMPT = (
@@ -141,7 +163,12 @@ DOCUMENT_OVERVIEW_PROMPT = (
     "Ensure all node labels are wrapped in double quotes.\n\n"
     "2. Be concise but comprehensive.\n"
     "3. NEVER start with 'Based on the provided text'. Start directly.\n"
-    "4. End with 2-3 dynamic follow-up questions that explore different topics than previously suggested."
+    "4. End with 2-3 dynamic follow-up questions that explore different topics than previously suggested.\n\n"
+    "MERMAID DIAGRAM RULES:\n"
+    "- FIRST LINE: flowchart TD, graph LR, or mindmap\.\n"
+    "- Node labels: A[Label] not A[Label: colon], B{\"quoted\"} not B[\"quoted\"]\.\n"
+    "- Arrows: --> not -> or ⇒\.\n"
+    "- Close subgraphs with 'end'\."
 )
 
 IEEE_PAPER_PROMPT = (
@@ -248,11 +275,14 @@ def get_prompt_for_intent(intent: str, detected_domains: list = None) -> str:
     MERMAID_RULES = (
         "\n\n*** CRITICAL MERMAID.JS SYNTAX RULES ***\n"
         "To prevent fatal rendering errors, every Mermaid diagram generated MUST follow these rules exactly:\n"
-        "1. Node Identifiers MUST be single, contiguous, alphanumeric words (e.g., NodeA, AppServer1). NO SPACES.\n"
-        '2. Node Labels MUST ALWAYS be enclosed in double quotes. Example: NodeA["Label Name"].\n'
-        '3. For labels with special characters (parentheses, commas, ampersands), double quotes are MANDATORY. Example: NodeB["Command, Control & Sync (C2)"].\n'
-        "4. Connections: Use standard arrows (-->). Do not attach unquoted text to arrows.\n"
-        "5. Graph Type: Use 'flowchart TD', 'flowchart LR', or 'mindmap'.\n"
+        "1. FIRST LINE must be: flowchart TD, graph LR, or sequenceDiagram (NOT flowChart, flowchart alone).\n"
+        "2. Node Identifiers MUST be single, contiguous, alphanumeric words (e.g., NodeA, AppServer1). NO SPACES.\n"
+        '3. Node Labels MUST ALWAYS be enclosed in double quotes or brackets. Example: NodeA["Label Name"] or NodeA[Label Name].\n'
+        '4. For labels with colons, quotes, or angle brackets - REMOVE them. Example: NodeB[Command - Control] not NodeB[Command: Control].\n'
+        "5. ARROWS: Use --> (double dash) not -> (single dash), use ==> (double equals) not => (single equals). NEVER use unicode arrows like → or ⇒.\n"
+        "6. Graph Type: Use 'flowchart TD', 'flowchart LR', or 'sequenceDiagram'.\n"
+        "7. Always close subgraphs with 'end'.\n"
+        "8. TEST before outputting: if a label has colon, quote, or angle bracket - fix it first.\n"
     )
 
     base_prompt += MERMAID_RULES

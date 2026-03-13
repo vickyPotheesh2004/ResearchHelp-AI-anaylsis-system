@@ -12,6 +12,7 @@ from src.prompt_templates import get_prompt_for_intent
 from src.research_engine import ResearchEngine
 from src.config import CHROMA_DB_PATH, DEFAULT_TOP_K, THREAD_POOL_MAX_WORKERS, RETRIEVAL_TIMEOUT, CHAT_HISTORY_CONTEXT_SIZE, QA_MAX_TOKENS, QA_TEMPERATURE
 from src.llm_client import get_llm_client
+from src.confidence_scorer import ConfidenceScorer
 from src.logging_utils import get_logger
 
 load_dotenv()
@@ -73,6 +74,7 @@ class QAEngine:
         self.segmenter = TopicSegmenter()
         self.intent_classifier = IntentClassifier()
         self.research_engine = ResearchEngine()
+        self.confidence_scorer = ConfidenceScorer(self.llm_client)
 
         self._bm25_corpus = []
         self._bm25_docs = []
@@ -268,6 +270,18 @@ class QAEngine:
             if domain.lower() in combined_text:
                 detected_domains.append(domain)
 
+        # Score confidence AFTER domain detection
+        try:
+            confidence_result = self.confidence_scorer.score_confidence(
+                user_question=question,
+                intent=intent,
+                domain=detected_domains[0] if detected_domains else "General",
+                context_chunks=[item['doc'] for item in retrieved],
+            )
+        except Exception as e:
+            logger.warning(f"Confidence scoring failed: {e}. Using default.")
+            confidence_result = {"score": 50, "level": "Moderate", "reason": "Score unavailable"}
+
         system_prompt = get_prompt_for_intent(intent, detected_domains=detected_domains)
         
         # Inject metadata if it's the IEEE intent
@@ -293,7 +307,7 @@ class QAEngine:
                 stream=True
             )
 
-            yield {"type": "meta", "intent": intent_result, "sources": source_citations[:5]}
+            yield {"type": "meta", "intent": intent_result, "sources": source_citations[:5], "confidence": confidence_result}
 
             full_content = ""
             for chunk in stream:
@@ -376,12 +390,25 @@ class QAEngine:
             })
         context = "\n\n".join(context_blocks)
 
+        # Detect domains BEFORE confidence scoring
         from src.prompt_templates import DOMAIN_PROMPTS
         detected_domains = []
         combined_text = f"{question} {context}".lower()
         for domain in DOMAIN_PROMPTS.keys():
             if domain.lower() in combined_text:
                 detected_domains.append(domain)
+        
+        # Score confidence BEFORE generating the answer
+        try:
+            confidence_result = self.confidence_scorer.score_confidence(
+                user_question=question,
+                intent=intent,
+                domain=detected_domains[0] if detected_domains else "General",
+                context_chunks=[item['doc'] for item in retrieved],
+            )
+        except Exception as e:
+            logger.warning(f"Confidence scoring failed: {e}. Using default.")
+            confidence_result = {"score": 50, "level": "Moderate", "reason": "Score unavailable"}
 
         system_prompt = get_prompt_for_intent(intent, detected_domains=detected_domains)
         
@@ -425,6 +452,7 @@ class QAEngine:
                 "reasoning_details": reasoning_data,
                 "intent": intent_result,
                 "sources": source_citations[:5],
+                "confidence": confidence_result,
             }
         except Exception as e:
             return {
@@ -432,4 +460,5 @@ class QAEngine:
                 "reasoning_details": None,
                 "intent": intent_result,
                 "sources": [],
+                "confidence": {"score": 50, "level": "Moderate", "reason": "Error occurred"},
             }
