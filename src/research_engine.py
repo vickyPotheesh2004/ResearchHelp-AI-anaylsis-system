@@ -95,29 +95,45 @@ class ResearchEngine:
             )
             raw = response.choices[0].message.content.strip()
 
-            # Step 1: Remove common markdown code block markers
-            clean_raw = raw
-            if "```json" in raw:
-                match = re.search(r"```json\s*(.*?)\s*```", raw, re.DOTALL)
+            # Step 1: Remove reasoning tags or common markdown code block markers
+            # Nemotron/Trinity often wrap content in reasoning blocks or markdown
+            if raw.startswith("> [Reasoning Mode]"):
+                content_start = raw.find("\n\n")
+                clean_raw = raw[content_start+2:] if content_start != -1 else raw[18:]
+            else:
+                clean_raw = raw
+
+            # Step 2: Handle markdown code blocks
+            if "```json" in clean_raw:
+                match = re.search(r"```json\s*(.*?)\s*```", clean_raw, re.DOTALL)
                 if match: clean_raw = match.group(1)
-            elif "```" in raw:
-                match = re.search(r"```\s*(.*?)\s*```", raw, re.DOTALL)
+            elif "```" in clean_raw:
+                match = re.search(r"```\s*(.*?)\s*```", clean_raw, re.DOTALL)
                 if match: clean_raw = match.group(1)
 
-            # Step 2: Extract the largest JSON array block
-            json_match = re.search(r"\[.*\]", clean_raw, re.DOTALL)
-            raw_json = json_match.group(0) if json_match else clean_raw
+            # Step 3: Extract the largest JSON array block by finding first [ and last ]
+            # This is more robust than regex which might be too greedy or fail on nesting
+            start_idx = clean_raw.find("[")
+            end_idx = clean_raw.rfind("]")
+            
+            if start_idx != -1 and end_idx != -1:
+                raw_json = clean_raw[start_idx : end_idx + 1]
+            else:
+                raw_json = clean_raw
 
             try:
                 suggestions = json.loads(raw_json)
             except json.JSONDecodeError as je:
                 logger.warning(f"Failed to parse suggestions JSON: {je}. Raw length: {len(raw)}")
-                # If direct load fails, try a final fallback: find anything that looks like an object
+                # Log raw content snippet for debugging in production
+                logger.debug(f"Raw problematic content: {raw[:500]}...")
                 return []
             
             if isinstance(suggestions, list):
-                logger.info(f"Generated {len(suggestions[:5])} suggestions")
-                return suggestions[:5]
+                # Filter out any non-dictionary elements and ensure structure
+                valid_suggestions = [s for s in suggestions if isinstance(s, dict) and 'title' in s]
+                logger.info(f"Generated {len(valid_suggestions[:5])} valid suggestions")
+                return valid_suggestions[:5]
             return []
         except Exception as e:
             error_msg = str(e)
