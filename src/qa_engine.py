@@ -212,11 +212,8 @@ class QAEngine:
         return self.intent_classifier.classify(question, self._available_topics)
 
     def _retrieve_context(self, question):
-        chunks, metas = self.get_all_chunks()
-        result = []
-        for doc, meta in zip(chunks, metas):
-            result.append({"doc": doc, "meta": meta, "score": 1.0})
-        return result
+        # Use hybrid retrieval to find the most relevant chunks instead of returning everything
+        return self._hybrid_retrieve(question, n_results=10)
 
     def get_answer_stream(self, question, chat_history, metadata=None):
         # Sanitize user input to prevent prompt injection

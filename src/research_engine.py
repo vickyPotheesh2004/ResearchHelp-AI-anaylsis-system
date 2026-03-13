@@ -95,23 +95,24 @@ class ResearchEngine:
             )
             raw = response.choices[0].message.content.strip()
 
-            # Skip the [Reasoning Mode] header if it exists
-            if raw.startswith("> [Reasoning Mode]"):
-                json_search_start = raw.find("\n\n")
-                raw_to_search = raw[json_search_start:] if json_search_start != -1 else raw[18:]
-            else:
-                raw_to_search = raw
+            # Step 1: Remove common markdown code block markers
+            clean_raw = raw
+            if "```json" in raw:
+                match = re.search(r"```json\s*(.*?)\s*```", raw, re.DOTALL)
+                if match: clean_raw = match.group(1)
+            elif "```" in raw:
+                match = re.search(r"```\s*(.*?)\s*```", raw, re.DOTALL)
+                if match: clean_raw = match.group(1)
 
-            start_idx = raw_to_search.find("[")
-            end_idx = raw_to_search.rfind("]")
-
-            if start_idx != -1 and end_idx != -1:
-                raw = raw_to_search[start_idx : end_idx + 1]
+            # Step 2: Extract the largest JSON array block
+            json_match = re.search(r"\[.*\]", clean_raw, re.DOTALL)
+            raw_json = json_match.group(0) if json_match else clean_raw
 
             try:
-                suggestions = json.loads(raw)
+                suggestions = json.loads(raw_json)
             except json.JSONDecodeError as je:
-                logger.warning(f"Failed to parse suggestions JSON: {je}. Raw response: {raw[:200]}")
+                logger.warning(f"Failed to parse suggestions JSON: {je}. Raw length: {len(raw)}")
+                # If direct load fails, try a final fallback: find anything that looks like an object
                 return []
             
             if isinstance(suggestions, list):

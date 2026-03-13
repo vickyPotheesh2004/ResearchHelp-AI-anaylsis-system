@@ -54,56 +54,80 @@ def render_content_with_mermaid(content):
     images = image_pattern.findall(content)
     clean_content = image_pattern.sub("", content)
 
-    mermaid_pattern = re.compile(r"```mermaid\s*\n(.*?)```", re.DOTALL)
+    mermaid_pattern = re.compile(r"```mermaid\s*(.*?)```", re.DOTALL)
     parts = mermaid_pattern.split(clean_content)
 
     if len(parts) == 1:
         st.markdown(clean_content)
     else:
-        mermaid_count = 0
+        # Collect all mermaid diagrams first
+        mermaid_diagrams = []
+        text_parts = []
         for i, part in enumerate(parts):
             if i % 2 == 0:
-                text = part.strip()
-                if text:
-                    st.markdown(text)
+                text_parts.append(part.strip())
             else:
-                mermaid_count += 1
-                mermaid_code = part.strip().replace("`", "'")
-                # Remove characters that break Mermaid labels
-                mermaid_code = re.sub(r'[(){}\[\]]', '', mermaid_code)
-                # Sanitize the mermaid code to prevent XSS
-                mermaid_code = mermaid_code.replace("<", "&lt;").replace(">", "&gt;")
-                
-                # Use a unique ID for each mermaid diagram
-                mermaid_id = f"mermaid-diagram-{mermaid_count}"
-                
-                html = f"""
-                <div style="background:#ffffff; border:1px solid #e0e0e0; border-radius:12px; padding:20px; margin:12px 0; text-align:center; overflow-x: auto;">
-                    <div id="{mermaid_id}" class="mermaid" style="display:flex; justify-content:center; min-height: 150px; overflow-x: auto;">
-                        {mermaid_code}
-                    </div>
+                mermaid_diagrams.append(part.strip())
+
+        # Render text parts
+        for text in text_parts:
+            if text:
+                st.markdown(text, unsafe_allow_html=True)
+
+        # If we have mermaid diagrams, render them with proper initialization
+        if mermaid_diagrams:
+            # Create unique IDs for all diagrams
+            diagram_html = ""
+            for idx, mermaid_code in enumerate(mermaid_diagrams, 1):
+                # Sanitize the mermaid code - but keep it valid for mermaid
+                safe_code = mermaid_code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                diagram_id = f"mermaid-diagram-{idx}"
+                diagram_html += f"""
+                <div id="{diagram_id}" class="mermaid" style="display:flex; justify-content:center; min-height: 150px; padding: 20px;">
+                    {safe_code}
                 </div>
-                <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-                <script>
-                    // Initialize mermaid with error handling
-                    (function() {{
-                        if (typeof mermaid !== 'undefined') {{
-                            mermaid.initialize({{
-                                startOnLoad: true,
-                                theme: 'default',
-                                flowchart: {{ curve: 'basis', padding: 20 }},
-                                securityLevel: 'strict',
-                                suppressErrorIndicators: true
-                            }});
-                        }}
-                    }})();
-                </script>
                 """
-                try:
-                    components.html(html, height=300, scrolling=True)
-                except Exception as e:
-                    # Fallback: show the mermaid code as preformatted text
-                    st.warning("Diagram rendering failed. Showing code instead:")
+
+            # Full HTML with mermaid library loaded once and proper initialization
+            html = f"""
+            <div style="background:#ffffff; border:1px solid #e0e0e0; border-radius:12px; padding:20px; margin:12px 0; text-align:center; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+                {diagram_html}
+            </div>
+            <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+            <script>
+                // Wait for mermaid to load and initialize
+                window.addEventListener('load', function() {{
+                    if (typeof mermaid !== 'undefined') {{
+                        mermaid.initialize({{
+                            startOnLoad: false,
+                            theme: 'default',
+                            flowchart: {{ curve: 'basis', padding: 20 }},
+                            securityLevel: 'loose'
+                        }});
+                        // Use mermaid.run() to render all diagrams on the page
+                        mermaid.run();
+                    }} else {{
+                        // Retry after a short delay if mermaid isn't loaded yet
+                        setTimeout(function() {{
+                            if (typeof mermaid !== 'undefined') {{
+                                mermaid.initialize({{
+                                    startOnLoad: false,
+                                    theme: 'default',
+                                    flowchart: {{ curve: 'basis', padding: 20 }},
+                                    securityLevel: 'loose'
+                                }});
+                                mermaid.run();
+                            }}
+                        }}, 500);
+                    }}
+                }});
+            </script>
+            """
+            try:
+                components.html(html, height=500, scrolling=True)
+            except Exception as e:
+                # Fallback to code block if rendering fails
+                for mermaid_code in mermaid_diagrams:
                     st.code(mermaid_code, language="mermaid")
 
     for img_prompt in images:
@@ -1162,8 +1186,8 @@ else:
                         st.markdown(
                             f"**{i+1}. {s.get('title', f'Suggestion {i+1}')}**"
                         )
-                        st.markdown(f"{s.get('description', '')}")
-                        st.markdown(f"*Category: {cat.upper()}*")
+                        st.markdown(f"{s.get('description', 'No description available.')}")
+                        st.markdown(f'<span class="suggestion-cat {cat_class}">{cat.upper()}</span>', unsafe_allow_html=True)
                         st.divider()
             else:
                 st.info("No suggestions generated yet.")

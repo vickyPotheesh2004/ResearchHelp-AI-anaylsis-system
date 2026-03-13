@@ -141,26 +141,26 @@ class IntentClassifier:
                 self._cache.popitem(last=False)
 
         fast_result = self._rule_based_classify(query)
-        if fast_result:
+        if fast_result and fast_result != "off_topic":  # Always use LLM for off_topic to be more accurate
             result = {"intent": fast_result, **INTENT_LABELS[fast_result]}
             with _cache_lock:
                 self._cache[cache_key] = result
             return result
 
+        # Strict system prompt - ensure only direct document questions are document_qa
         system_prompt = (
             "You are an Intent Classifier for a Document Q&A system. "
-            "Your goal is to decide if the user's query is related to the documents or a valid system request.\n\n"
+            "Classify the user's query into the most appropriate category.\n\n"
             "Categories:\n"
-            "document_qa: Questions about content, requests for explanations, or follow-ups. "
-            "CRITICAL: IF THE QUERY HAS EVEN A SLIGHT OR REMOTE CONNECTION TO THE DOCUMENT TOPICS, KEYWORDS, OR CONTEXT, YOU MUST CHOOSE THIS. Err on the side of answering.\n"
+            "document_qa: Specific questions about the document content. "
+            "CRITICAL: Only choose this if the query is DIRECTLY related to the provided document topics. "
+            "Do NOT choose this for general knowledge questions in the same field (e.g., do NOT choose this for aeroplanes if doc is about drones).\n"
             "suggestion_request: Asking for ways to improve or expand the document/project.\n"
-            "research_analysis: Deep analysis on specialized domains like AI, Physics, VLSI, 5G, etc., explaining in VERY SIMPLE English.\n"
-            "ieee_paper_gen: Generate a full, professional IEEE-style research paper from the session analysis.\n"
+            "research_analysis: Deep analysis on specialized research domains.\n"
+            "ieee_paper_gen: Generate a full IEEE-style research paper.\n"
             "research_addon: Proposing new features or technical additions.\n"
-            "off_topic: Completely unrelated (e.g., weather, generic jokes, personal questions).\n\n"
+            "off_topic: Queries unrelated to the specific document content, even if they share a broad industry (e.g., general physics, different vehicle types, weather, jokes).\n\n"
             f"Available Document Topics: {', '.join(available_topics[:15]) if available_topics else 'None listed'}\n\n"
-            "CRITICAL: If the user asks for a 'visual', 'diagram', or 'explanation' of a technical concept, "
-            "assume it is 'document_qa' even if mentioned vaguely.\n\n"
             "Reply ONLY with the category name."
         )
 
