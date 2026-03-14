@@ -419,35 +419,14 @@ class EmbeddingSegmenter:
             return np.random.rand(len(sentences), 50)
 
     def _calculate_depth_scores_improved(self, similarities: List[float]) -> List[float]:
-        """Calculate depth scores with improved peak detection."""
+        """Calculate depth scores with numpy-vectorized prefix/suffix maximum (O(n))."""
         if not similarities:
             return []
 
-        n = len(similarities)
-        depth_scores = []
-
-        for i in range(n):
-            # Look left for peak
-            lpeak = similarities[i]
-            for j in range(i, -1, -1):
-                if similarities[j] > lpeak:
-                    lpeak = similarities[j]
-                else:
-                    break
-
-            # Look right for peak
-            rpeak = similarities[i]
-            for j in range(i, n):
-                if similarities[j] > rpeak:
-                    rpeak = similarities[j]
-                else:
-                    break
-
-            # Depth = sum of drops from peaks
-            depth = (lpeak - similarities[i]) + (rpeak - similarities[i])
-            depth_scores.append(depth)
-
-        return depth_scores
+        sims_arr = np.array(similarities)
+        left_peaks = np.maximum.accumulate(sims_arr)
+        right_peaks = np.maximum.accumulate(sims_arr[::-1])[::-1]
+        return ((left_peaks - sims_arr) + (right_peaks - sims_arr)).tolist()
 
     def _find_boundaries_improved(self, depth_scores: List[float], n_sentences: int,
                                    num_topics: Optional[int]) -> List[int]:

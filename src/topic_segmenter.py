@@ -1,5 +1,6 @@
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
 from typing import List, Dict
 import threading
 from src.topic_titler import TopicTitler
@@ -54,22 +55,12 @@ class TopicSegmenter:
             similarities.append(sim)
             
         # 2. Calculate Depth Scores (Inspired by TextTiling)
-        # Depth score measures how much a "valley" in similarity compares to its neighbors
-        depth_scores = [0.0] * len(similarities)
-        for i in range(len(similarities)):
-            # Scan left for peak
-            lpeak = similarities[i]
-            for j in range(i - 1, -1, -1):
-                if similarities[j] >= lpeak: lpeak = similarities[j]
-                else: break
-            
-            # Scan right for peak
-            rpeak = similarities[i]
-            for j in range(i + 1, len(similarities)):
-                if similarities[j] >= rpeak: rpeak = similarities[j]
-                else: break
-                
-            depth_scores[i] = (lpeak - similarities[i]) + (rpeak - similarities[i])
+        # Depth score measures how much a "valley" in similarity compares to its neighbors.
+        # Uses numpy prefix/suffix maximum accumulation for O(n) performance.
+        sims_arr = np.array(similarities)
+        left_peaks = np.maximum.accumulate(sims_arr)
+        right_peaks = np.maximum.accumulate(sims_arr[::-1])[::-1]
+        depth_scores = ((left_peaks - sims_arr) + (right_peaks - sims_arr)).tolist()
 
         # 3. Identify boundaries (Statistical Outlier Detection)
         # Instead of a fixed threshold, we look for "anomalies" in thematic coherence

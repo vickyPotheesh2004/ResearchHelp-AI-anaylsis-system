@@ -156,18 +156,21 @@ class QAEngine:
 
         seen = set()
         combined = []
+        combined_lookup = {}  # key -> index in combined for O(1) score updates
 
         for doc, meta, dist in zip(semantic_docs, semantic_metas, semantic_distances):
             key = doc[:100]
             if key not in seen:
                 seen.add(key)
                 relevance = max(0, 1 - dist) if dist else 0.5
+                combined_lookup[key] = len(combined)
                 combined.append({"doc": doc, "meta": meta, "score": relevance * 0.7})
 
         if self._bm25_index:
             tokenized_query = query.lower().split()
             bm25_scores = self._bm25_index.get_scores(tokenized_query)
-            max_bm25 = max(bm25_scores) if max(bm25_scores) > 0 else 1
+            max_bm25_val = max(bm25_scores)
+            max_bm25 = max_bm25_val if max_bm25_val > 0 else 1
             top_bm25_indices = sorted(range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True)[:n_results]
 
             logger.info(f"BM25 search returned {sum(1 for s in bm25_scores if s > 0)} non-zero scores")
@@ -178,16 +181,14 @@ class QAEngine:
                     norm_score = (bm25_scores[idx] / max_bm25) * 0.3
                     if key not in seen:
                         seen.add(key)
+                        combined_lookup[key] = len(combined)
                         combined.append({
                             "doc": self._bm25_docs[idx],
                             "meta": self._bm25_metas[idx],
                             "score": norm_score
                         })
                     else:
-                        for item in combined:
-                            if item["doc"][:100] == key:
-                                item["score"] += norm_score
-                                break
+                        combined[combined_lookup[key]]["score"] += norm_score
 
         combined.sort(key=lambda x: x["score"], reverse=True)
         return combined[:n_results]

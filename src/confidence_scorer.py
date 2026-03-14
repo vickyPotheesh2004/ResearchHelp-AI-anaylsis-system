@@ -109,6 +109,14 @@ class ConfidenceScorer:
     MIN_SCORE = 10
     MAX_SCORE = 85  # Never exceed 85 without LLM evaluation
 
+    # Pre-compiled patterns for query specificity detection
+    _SPECIFIC_INDICATORS = [
+        re.compile(r'\d+'),
+        re.compile(r'\b[A-Z][a-z]+\d+\b'),
+        re.compile(r'version \d'),
+        re.compile(r'\d+\.\d+'),
+    ]
+
     FALLBACK = {"score": 50, "level": "Moderate", "reason": "Score unavailable — showing default."}
 
     def __init__(self, llm_client):
@@ -222,8 +230,7 @@ class ConfidenceScorer:
         
         # Criterion 5: Query specificity check
         # Very specific queries (with technical terms, numbers, proper nouns) get lower base
-        specific_indicators = [r'\d+', r'\b[A-Z][a-z]+\d+\b', r'version \d', r'\d+\.\d+']
-        is_specific = any(re.search(p, user_question) for p in specific_indicators)
+        is_specific = any(p.search(user_question) for p in self._SPECIFIC_INDICATORS)
         if is_specific:
             score += self.QUERY_SPECIFICITY_PENALTY
             reasons.append("specific query")

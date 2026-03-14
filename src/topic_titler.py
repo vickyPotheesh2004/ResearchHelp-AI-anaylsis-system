@@ -58,6 +58,13 @@ NP_GRAMMAR = r"""
 """
 NP_PARSER = nltk.RegexpParser(NP_GRAMMAR)
 
+# Pre-compiled regex to remove meta stop-phrases before title generation.
+# Sorted longest-first so more specific multi-word phrases match before shorter sub-phrases.
+_STOP_PHRASES_PATTERN = re.compile(
+    "|".join(re.escape(p) for p in sorted(STOP_PHRASES, key=len, reverse=True)),
+    re.IGNORECASE,
+)
+
 # Get logger - this ensures logging is configured
 logger = get_logger(__name__)
 
@@ -74,17 +81,14 @@ class TopicTitler:
 
         combined_text = " ".join(texts)
         
-        # 0. Filter out stop phrases
-        cleaned_text_for_phrases = combined_text.lower()
-        for phrase in STOP_PHRASES:
-            cleaned_text_for_phrases = cleaned_text_for_phrases.replace(phrase, " ")
+        # 0. Remove stop phrases before tokenization (preserving case for proper noun detection)
+        combined_text_filtered = _STOP_PHRASES_PATTERN.sub(" ", combined_text)
 
         # Clean text preserving case and special symbols for tech terms
-        clean_text = re.sub(r"[^a-zA-Z0-9\s\-\.]", " ", combined_text)
+        clean_text = re.sub(r"[^a-zA-Z0-9\s\-\.]", " ", combined_text_filtered)
         tokens = word_tokenize(clean_text)
 
         # 1. NP Chunking with enhanced extraction
-        tokens = word_tokenize(clean_text)
         if not tokens:
             return "General"
 
@@ -111,13 +115,16 @@ class TopicTitler:
             doc_tokens = word_tokenize(doc_full_text.lower())
             doc_freq = Counter(doc_tokens)
             seg_freq = Counter(segment_keywords)
+            # Build first-occurrence index once for O(1) lookups instead of O(n) list.index()
+            seg_kw_first_idx = {}
+            for _idx, _w in enumerate(segment_keywords):
+                if _w not in seg_kw_first_idx:
+                    seg_kw_first_idx[_w] = _idx
             for word, count in seg_freq.items():
                 tf = count
                 idf = 1.0 / (1.0 + doc_freq[word])
-                try:
-                    first_idx = segment_keywords.index(word)
-                    pos_weight = 1.0 / (1.0 + (first_idx / len(segment_keywords)))
-                except ValueError: pos_weight = 1.0
+                first_idx = seg_kw_first_idx.get(word, len(segment_keywords))
+                pos_weight = 1.0 / (1.0 + (first_idx / len(segment_keywords)))
                 word_scores[word] = tf * idf * pos_weight
         else:
             for i, word in enumerate(segment_keywords):

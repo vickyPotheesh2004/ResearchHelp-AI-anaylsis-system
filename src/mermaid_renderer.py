@@ -194,7 +194,6 @@ class MermaidCleaner:
             content = re.sub(r"<(?!br)(?!/br)([^>]{0,30})>", r"\1", content)
 
             # Decode common HTML entities
-            content = content.replace("&", "&")
             content = content.replace("<", "less than")
             content = content.replace(">", "greater than")
             content = content.replace("&nbsp;", " ")
@@ -265,12 +264,10 @@ class MermaidCleaner:
     @staticmethod
     def _fix_indentation(code: str) -> str:
         """Convert tabs to 4 spaces. Strip trailing whitespace per line."""
-        lines = []
-        for line in code.split("\n"):
-            line = line.replace("\t", "    ")
-            line = line.rstrip()
-            lines.append(line)
-        return "\n".join(lines)
+        return "\n".join(
+            line.replace("\t", "    ").rstrip()
+            for line in code.split("\n")
+        )
 
     @staticmethod
     def _remove_consecutive_blanks(code: str) -> str:
