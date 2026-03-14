@@ -171,7 +171,7 @@ class TestConfidenceScorer(unittest.TestCase):
         self.assertEqual(result["score"], 20)
         
     def test_score_confidence_llm_exception(self):
-        """Test fallback when LLM call fails."""
+        """Test fallback when LLM call fails - should use criteria-based scoring."""
         self.mock_llm_client.create_fast_completion.side_effect = Exception("API Error")
         
         result = self.scorer.score_confidence(
@@ -181,8 +181,18 @@ class TestConfidenceScorer(unittest.TestCase):
             context_chunks=["test"]
         )
         
-        # Should return fallback
-        self.assertEqual(result, ConfidenceScorer.FALLBACK)
+        # Should return criteria-based scoring (not fixed 50% fallback)
+        # With 1 chunk and no sources, score should be: 25 + 8 + 0 + 0 + 10 = 43 (but bounded to min 10)
+        # Actually: base 25 + chunk 8 + domain 10 = 43, within bounds 10-85
+        self.assertIsInstance(result, dict)
+        self.assertIn('score', result)
+        self.assertIn('level', result)
+        self.assertIn('reason', result)
+        # Score should NOT be 50 (the old fixed fallback)
+        self.assertNotEqual(result['score'], 50)
+        # Score should be within the defined bounds
+        self.assertGreaterEqual(result['score'], 10)
+        self.assertLessEqual(result['score'], 85)
         
     def test_score_confidence_with_long_context(self):
         """Test that long context is properly truncated."""

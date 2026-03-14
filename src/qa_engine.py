@@ -277,10 +277,17 @@ class QAEngine:
                 intent=intent,
                 domain=detected_domains[0] if detected_domains else "General",
                 context_chunks=[item['doc'] for item in retrieved],
+                has_sources=len(retrieved) > 0,
             )
         except Exception as e:
-            logger.warning(f"Confidence scoring failed: {e}. Using default.")
-            confidence_result = {"score": 50, "level": "Moderate", "reason": "Score unavailable"}
+            logger.warning(f"Confidence scoring failed: {e}. Using criteria-based scoring.")
+            confidence_result = self.confidence_scorer._criteria_based_scoring(
+                user_question=question,
+                intent=intent,
+                domain=detected_domains[0] if detected_domains else "General",
+                context_chunks=[item['doc'] for item in retrieved],
+                has_sources=len(retrieved) > 0,
+            )
 
         system_prompt = get_prompt_for_intent(intent, detected_domains=detected_domains)
         
@@ -405,10 +412,17 @@ class QAEngine:
                 intent=intent,
                 domain=detected_domains[0] if detected_domains else "General",
                 context_chunks=[item['doc'] for item in retrieved],
+                has_sources=len(retrieved) > 0,
             )
         except Exception as e:
-            logger.warning(f"Confidence scoring failed: {e}. Using default.")
-            confidence_result = {"score": 50, "level": "Moderate", "reason": "Score unavailable"}
+            logger.warning(f"Confidence scoring failed: {e}. Using criteria-based scoring.")
+            confidence_result = self.confidence_scorer._criteria_based_scoring(
+                user_question=question,
+                intent=intent,
+                domain=detected_domains[0] if detected_domains else "General",
+                context_chunks=[item['doc'] for item in retrieved],
+                has_sources=len(retrieved) > 0,
+            )
 
         system_prompt = get_prompt_for_intent(intent, detected_domains=detected_domains)
         
@@ -460,5 +474,11 @@ class QAEngine:
                 "reasoning_details": None,
                 "intent": intent_result,
                 "sources": [],
-                "confidence": {"score": 50, "level": "Moderate", "reason": "Error occurred"},
+                "confidence": self.confidence_scorer._criteria_based_scoring(
+                    user_question=question,
+                    intent=intent_result.get("intent", "general") if isinstance(intent_result, dict) else "general",
+                    domain="",
+                    context_chunks=[],
+                    has_sources=False,
+                ),
             }

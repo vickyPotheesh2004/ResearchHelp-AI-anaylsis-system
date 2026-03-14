@@ -97,6 +97,18 @@ class ConfidenceScorer:
     # result → {"score": 82, "level": "High", "reason": "Multiple chunks directly address hardware specs."}
     """
 
+    # Criteria-based scoring thresholds
+    CHUNK_WEIGHT = 8          # Points per chunk (max 5 chunks = +40)
+    LENGTH_WEIGHT = 0.015     # Points per character in context
+    SOURCE_BONUS = 15         # Bonus when sources are available
+    DOMAIN_MATCH_BONUS = 10   # Bonus when domain is matched
+    QUERY_SPECIFICITY_PENALTY = -10  # Penalty for very specific/niche queries
+    
+    # Base score and bounds
+    BASE_SCORE = 25
+    MIN_SCORE = 10
+    MAX_SCORE = 85  # Never exceed 85 without LLM evaluation
+
     FALLBACK = {"score": 50, "level": "Moderate", "reason": "Score unavailable — showing default."}
 
     def __init__(self, llm_client):
@@ -116,6 +128,7 @@ class ConfidenceScorer:
         domain: str,
         context_chunks: list[str],
         max_context_chars: int = 3000,
+        has_sources: bool = True,
     ) -> dict:
         """
         Returns a dict: {"score": int, "level": str, "reason": str}
@@ -127,6 +140,7 @@ class ConfidenceScorer:
         domain            : Detected domain (e.g. "Cybersecurity")
         context_chunks    : List of retrieved text chunks (strings)
         max_context_chars : Safety cap to avoid token overflow
+        has_sources      : Whether sources/citations are available
         """
         try:
             combined = self._format_chunks(context_chunks, max_context_chars)
@@ -143,10 +157,90 @@ class ConfidenceScorer:
             return result
 
         except Exception as e:
-            logger.warning(f"[ConfidenceScorer] Failed, using fallback. Error: {e}")
-            return self.FALLBACK
+            logger.warning(f"[ConfidenceScorer] Failed, using criteria-based scoring. Error: {e}")
+            # Use criteria-based grading instead of fixed 50%
+            return self._criteria_based_scoring(
+                user_question=user_question,
+                intent=intent,
+                domain=domain,
+                context_chunks=context_chunks,
+                has_sources=has_sources,
+            )
 
-    # ── Private Helpers ───────────────────────────────────────────────────────
+    # ── Criteria-Based Scoring (fallback when LLM fails) ─────────────────────
+
+    def _criteria_based_scoring(
+        self,
+        user_question: str,
+        intent: str,
+        domain: str,
+        context_chunks: list[str],
+        has_sources: bool = True,
+    ) -> dict:
+        """
+        Calculates confidence score based on concrete criteria when LLM fails.
+        
+        Grading Criteria:
+        -----------------
+        1. Number of context chunks: +8 points per chunk (max 5 chunks = +40)
+        2. Total context length: +1.5 points per 100 chars (max ~1500 = +22)
+        3. Has sources/citations: +15 bonus
+        4. Domain matched: +10 bonus
+        5. Query specificity: -10 for very specific/niche queries
+        6. Base score: 25
+        
+        Score Range: 10-85 (never exceeds 85 without LLM evaluation)
+        """
+        score = self.BASE_SCORE
+        reasons = []
+        
+        # Criterion 1: Number of context chunks
+        num_chunks = len(context_chunks)
+        chunk_score = min(num_chunks * self.CHUNK_WEIGHT, 5 * self.CHUNK_WEIGHT)
+        score += chunk_score
+        if num_chunks >= 3:
+            reasons.append(f"{num_chunks} relevant chunks found")
+        elif num_chunks > 0:
+            reasons.append(f"{num_chunks} chunk(s) available")
+        
+        # Criterion 2: Total context length
+        total_length = sum(len(chunk) for chunk in context_chunks)
+        length_score = min(int(total_length * self.LENGTH_WEIGHT), 22)
+        score += length_score
+        if total_length > 500:
+            reasons.append("substantial context")
+        
+        # Criterion 3: Sources available
+        if has_sources:
+            score += self.SOURCE_BONUS
+            reasons.append("sources cited")
+        
+        # Criterion 4: Domain matched (non-empty domain)
+        if domain and domain != "General":
+            score += self.DOMAIN_MATCH_BONUS
+            reasons.append(f"domain: {domain}")
+        
+        # Criterion 5: Query specificity check
+        # Very specific queries (with technical terms, numbers, proper nouns) get lower base
+        specific_indicators = [r'\d+', r'\b[A-Z][a-z]+\d+\b', r'version \d', r'\d+\.\d+']
+        is_specific = any(re.search(p, user_question) for p in specific_indicators)
+        if is_specific:
+            score += self.QUERY_SPECIFICITY_PENALTY
+            reasons.append("specific query")
+        
+        # Apply bounds
+        score = max(self.MIN_SCORE, min(self.MAX_SCORE, score))
+        
+        # Generate reason string
+        reason = ", ".join(reasons[:2]) if reasons else "Criteria-based score"
+        if len(reason) > 50:
+            reason = reason[:47] + "..."
+        
+        return {
+            "score": score,
+            "level": self._score_to_level(score),
+            "reason": reason,
+        }
 
     def _format_chunks(self, chunks: list[str], max_chars: int) -> str:
         """Formats and truncates chunks for the prompt."""
