@@ -62,12 +62,18 @@ ABBREVIATIONS = {
     "i.e.",
 }
 
+# Pre-compiled regex patterns for performance
+_FILLER_PATTERN = re.compile("|".join(FILLERS), re.IGNORECASE)
+_WHITESPACE_PATTERN = re.compile(r"\s+")
+_SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[.!?])\s+")
+_LAST_WORD_PATTERN = re.compile(r"(\S+)\s*$")
+
 
 def smart_sentence_split(text: str) -> list:
     """Split text into sentences intelligently, handling abbreviations."""
-    text = re.sub(r"\s+", " ", text).strip()
+    text = _WHITESPACE_PATTERN.sub(" ", text).strip()
 
-    raw_splits = re.split(r"(?<=[.!?])\s+", text)
+    raw_splits = _SENTENCE_SPLIT_PATTERN.split(text)
 
     sentences = []
     buffer = ""
@@ -75,7 +81,7 @@ def smart_sentence_split(text: str) -> list:
     for fragment in raw_splits:
         buffer = (buffer + " " + fragment).strip() if buffer else fragment
 
-        last_word_match = re.search(r"(\S+)\s*$", buffer)
+        last_word_match = _LAST_WORD_PATTERN.search(buffer)
         if last_word_match:
             last_word = last_word_match.group(1).lower()
             if last_word in ABBREVIATIONS:
@@ -93,11 +99,9 @@ def smart_sentence_split(text: str) -> list:
 
 def clean_text(text: str) -> str:
     """Remove filler words and clean up text."""
-    t = text
-    for f in FILLERS:
-        t = re.sub(f, " ", t, flags=re.IGNORECASE)
+    t = _FILLER_PATTERN.sub(" ", text)
     t = re.sub(r"\b(\w+)\s+\1\b", r"\1", t)
-    t = re.sub(r"\s+", " ", t)
+    t = _WHITESPACE_PATTERN.sub(" ", t)
     return t.strip()
 
 
