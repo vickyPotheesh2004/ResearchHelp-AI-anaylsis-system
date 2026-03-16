@@ -1,4 +1,5 @@
 import json
+import re
 from dotenv import load_dotenv
 from src.prompt_templates import (
     DOCUMENT_OVERVIEW_PROMPT,
@@ -96,46 +97,99 @@ class ResearchEngine:
             raw = response.choices[0].message.content.strip()
 
             # Step 1: Remove reasoning tags or common markdown code block markers
-            # Nemotron/Trinity often wrap content in reasoning blocks or markdown
-            if raw.startswith("> [Reasoning Mode]"):
-                content_start = raw.find("\n\n")
-                clean_raw = raw[content_start+2:] if content_start != -1 else raw[18:]
-            else:
-                clean_raw = raw
+            # More aggressive cleaning for Nemotron/Trinity reasoning blocks
+            clean_raw = re.sub(r"^>(.*?)\n\n", "", raw, flags=re.DOTALL | re.MULTILINE)
+            # Remove any thinking blocks if they leaked
+            clean_raw = re.sub(r"<think>.*?</think>", "", clean_raw, flags=re.DOTALL | re.IGNORECASE)
+            clean_raw = clean_raw.strip()
 
             # Step 2: Handle markdown code blocks
-            if "```json" in clean_raw:
-                match = re.search(r"```json\s*(.*?)\s*```", clean_raw, re.DOTALL)
-                if match: clean_raw = match.group(1)
-            elif "```" in clean_raw:
-                match = re.search(r"```\s*(.*?)\s*```", clean_raw, re.DOTALL)
-                if match: clean_raw = match.group(1)
-
-            # Step 3: Extract the largest JSON array block by finding first [ and last ]
-            # This is more robust than regex which might be too greedy or fail on nesting
-            start_idx = clean_raw.find("[")
-            end_idx = clean_raw.rfind("]")
-            
-            if start_idx != -1 and end_idx != -1:
-                raw_json = clean_raw[start_idx : end_idx + 1]
+            json_match = re.search(r"```json\s*(.*?)\s*```", clean_raw, re.DOTALL | re.IGNORECASE)
+            if json_match:
+                clean_raw = json_match.group(1)
             else:
-                raw_json = clean_raw
+                generic_match = re.search(r"```\s*(.*?)\s*```", clean_raw, re.DOTALL)
+                if generic_match:
+                    clean_raw = generic_match.group(1)
 
-            try:
-                suggestions = json.loads(raw_json)
-            except json.JSONDecodeError as je:
-                logger.warning(f"Failed to parse suggestions JSON: {je}. Raw length: {len(raw)}")
-                # Log raw content snippet for debugging in production
-                logger.debug(f"Raw problematic content: {raw[:500]}...")
-                return []
+            # Step 3: Extract the first [ and last ] or { and }
+            # Try to find the outermost array first
+            s_arr = clean_raw.find("[")
+            e_arr = clean_raw.rfind("]")
             
-            if isinstance(suggestions, list):
-                # Filter out any non-dictionary elements and ensure structure
-                valid_suggestions = [s for s in suggestions if isinstance(s, dict) and 'title' in s]
-                logger.info(f"Generated {len(valid_suggestions[:5])} valid suggestions")
-                return valid_suggestions[:5]
+            # Also check for an outermost object (sometimes models wrap list in a key)
+            s_obj = clean_raw.find("{")
+            e_obj = clean_raw.rfind("}")
+
+            raw_json = clean_raw
+            if s_arr != -1 and e_arr != -1:
+                # If there's an object wrapping the array, take the object instead
+                if s_obj != -1 and s_obj < s_arr and e_obj != -1 and e_obj > e_arr:
+                    raw_json = clean_raw[s_obj : e_obj + 1]
+                else:
+                    raw_json = clean_raw[s_arr : e_arr + 1]
+            elif s_obj != -1 and e_obj != -1:
+                raw_json = clean_raw[s_obj : e_obj + 1]
+
+            suggestions = []
+            try:
+                parsed = json.loads(raw_json)
+            except json.JSONDecodeError:
+                try:
+                    # Remove potential trailing commas before ] or }
+                    fixed_json = re.sub(r",\s*(\]|})", r"\1", raw_json)
+                    parsed = json.loads(fixed_json)
+                except Exception as e:
+                    logger.warning(f"Failed to parse suggestions JSON: {str(e)}")
+                    # Last resort: try to find anything that looks like a list
+                    return []
+
+            # Step 4: Normalize the output
+            if isinstance(parsed, dict):
+                # Check for common keys like 'suggestions', 'research_suggestions', etc.
+                for key in ['suggestions', 'research_suggestions', 'items', 'data']:
+                    if key in parsed and isinstance(parsed[key], list):
+                        suggestions = parsed[key]
+                        break
+                if not suggestions:
+                    # Maybe it's a single suggestion?
+                    suggestions = [parsed]
+            elif isinstance(parsed, list):
+                suggestions = parsed
+
+            # Step 5: Validate and clean individual suggestions
+            final_suggestions = []
+            for item in suggestions:
+                if isinstance(item, str):
+                    # Convert simple string suggestions to dict format
+                    final_suggestions.append({
+                        "title": item[:50],
+                        "description": item,
+                        "category": "research"
+                    })
+                elif isinstance(item, dict):
+                    # Handle case-insensitive keys
+                    s_norm = {k.lower(): v for k, v in item.items()}
+                    title = s_norm.get('title', s_norm.get('suggestion', ''))
+                    desc = s_norm.get('description', s_norm.get('explanation', ''))
+                    cat = s_norm.get('category', 'research')
+                    
+                    if title:
+                        final_suggestions.append({
+                            "title": title,
+                            "description": desc or "No description provided.",
+                            "category": cat
+                        })
+
+            if final_suggestions:
+                logger.info(f"Generated {len(final_suggestions[:5])} valid suggestions")
+                return final_suggestions[:5]
+            
+            logger.warning("No valid suggestions found after normalization")
             return []
         except Exception as e:
+            logger.error(f"Critical error in suggestion parsing: {str(e)}", exc_info=True)
+            return []
             error_msg = str(e)
             logger.error(f"Failed to generate auto suggestions: {error_msg}")
             if "429" in error_msg:

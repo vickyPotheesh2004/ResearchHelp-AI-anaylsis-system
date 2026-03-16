@@ -141,7 +141,7 @@ class IntentClassifier:
                 self._cache.popitem(last=False)
 
         fast_result = self._rule_based_classify(query)
-        if fast_result and fast_result != "off_topic":  # Always use LLM for off_topic to be more accurate
+        if fast_result:
             result = {"intent": fast_result, **INTENT_LABELS[fast_result]}
             with _cache_lock:
                 self._cache[cache_key] = result
@@ -154,14 +154,15 @@ class IntentClassifier:
             "Categories:\n"
             "document_qa: Specific questions about the document content. "
             "CRITICAL: Only choose this if the query is DIRECTLY related to the provided document topics. "
-            "Do NOT choose this for general knowledge questions in the same field (e.g., do NOT choose this for aeroplanes if doc is about drones).\n"
             "suggestion_request: Asking for ways to improve or expand the document/project.\n"
             "research_analysis: Deep analysis on specialized research domains.\n"
             "ieee_paper_gen: Generate a full IEEE-style research paper.\n"
             "research_addon: Proposing new features or technical additions.\n"
-            "off_topic: Queries unrelated to the specific document content, even if they share a broad industry (e.g., general physics, different vehicle types, weather, jokes).\n\n"
-            f"Available Document Topics: {', '.join(available_topics[:15]) if available_topics else 'None listed'}\n\n"
-            "Reply ONLY with the category name."
+            "off_topic: Queries unrelated to the specific document content. "
+            "Examples: Greeting, jokes, world news, or general industry questions (e.g., asking about AI history if the doc is only about a specific drone controller).\n\n"
+            f"Available Document Topics: {', '.join(available_topics[:20]) if available_topics else 'None listed'}\n\n"
+            "If the query is NOT about the specific topics listed above, you MUST return 'off_topic'.\n"
+            "Reply ONLY with the category name (e.g., 'document_qa' or 'off_topic')."
         )
 
         try:
@@ -174,29 +175,32 @@ class IntentClassifier:
                 max_tokens=INTENT_MAX_TOKENS,
                 temperature=INTENT_TEMPERATURE
             )
-            raw = (
-                response.choices[0]
-                .message.content.strip()
-                .lower()
-                .replace('"', "")
-                .replace("'", "")
-            )
+            raw = response.choices[0].message.content.strip().lower()
+            
+            # Clean response
+            clean_raw = re.sub(r'[^a-z_]', '', raw)
 
-            for key in INTENT_LABELS:
-                if key in raw:
-                    result = {"intent": key, **INTENT_LABELS[key]}
-                    with _cache_lock:
-                        self._cache[cache_key] = result
-                    return result
+            if "off_topic" in clean_raw:
+                result = {"intent": "off_topic", **INTENT_LABELS["off_topic"]}
+            elif "document_qa" in clean_raw:
+                result = {"intent": "document_qa", **INTENT_LABELS["document_qa"]}
+            else:
+                # Map to closest matching category
+                for key in INTENT_LABELS:
+                    if key in clean_raw:
+                        result = {"intent": key, **INTENT_LABELS[key]}
+                        break
+                else:
+                    # Default to off_topic if ambiguous/hallucinated
+                    result = {"intent": "off_topic", **INTENT_LABELS["off_topic"]}
 
-            result = {"intent": "document_qa", **INTENT_LABELS["document_qa"]}
             with _cache_lock:
                 self._cache[cache_key] = result
             return result
 
         except Exception as e:
             logger.error(f"Intent classification LLM call failed: {e}")
-            result = {"intent": "document_qa", **INTENT_LABELS["document_qa"]}
+            result = {"intent": "off_topic", **INTENT_LABELS["off_topic"]} # Safer default
             with _cache_lock:
                 self._cache[cache_key] = result
             return result

@@ -12,7 +12,7 @@ from src.extractor import process_file
 from src.qa_engine import QAEngine
 from src.config import validate_config
 from src.logging_utils import setup_logging
-from src.mermaid_renderer import MermaidCleaner, MermaidValidator, MERMAID_HTML_TEMPLATE, MERMAID_CDN
+from src.mermaid_renderer import MermaidCleaner, MermaidValidator, MERMAID_HTML_TEMPLATE, MERMAID_CDN, render_content_with_mermaid
 
 # Initialize logging at application startup
 setup_logging()
@@ -46,77 +46,7 @@ def sanitize_for_markdown(text: str) -> str:
     return text
 
 
-def render_content_with_mermaid(content: str) -> None:
-    """
-    DROP-IN REPLACEMENT for the existing render_content_with_mermaid() in app.py.
 
-    Finds all Mermaid code blocks in the LLM response, cleans and validates
-    each one, then renders them inline using Mermaid.js via Streamlit components.
-    Non-Mermaid text is rendered as standard Markdown.
-
-    Parameters
-    ----------
-    content : str
-        The full LLM response string, which may contain ```mermaid ... ``` blocks
-        mixed with regular Markdown text.
-    """
-    import streamlit as st
-    import streamlit.components.v1 as components
-    import json
-    import uuid
-
-    # Split content on ```mermaid ... ``` boundaries
-    # Produces alternating [text, mermaid_code, text, mermaid_code, ...] segments
-    parts = re.split(r"(```(?:mermaid)?\s*\n.*?```)", content, flags=re.DOTALL | re.IGNORECASE)
-
-    # Inject Mermaid CDN once per session
-    if "mermaid_cdn_injected" not in st.session_state:
-        components.html(MERMAID_CDN, height=0)
-        st.session_state["mermaid_cdn_injected"] = True
-
-    for part in parts:
-        part = part.strip()
-        if not part:
-            continue
-
-        # Detect if this segment is a mermaid block
-        is_mermaid = bool(re.match(r"^```(?:mermaid)?", part, re.IGNORECASE))
-
-        if is_mermaid:
-            # Extract raw code (strip fences)
-            raw_code = re.sub(r"^```(?:mermaid)?\s*\n?", "", part, flags=re.IGNORECASE)
-            raw_code = re.sub(r"\n?```\s*$", "", raw_code)
-
-            # Clean the code
-            cleaned = MermaidCleaner.clean(raw_code)
-
-            # Validate
-            is_valid, error_msg = MermaidValidator.validate(cleaned)
-
-            if not is_valid:
-                # Show clean error with the fixed code so the user can see what went wrong
-                st.warning(f"⚠️ Diagram syntax issue: {error_msg}")
-                with st.expander("Show diagram code"):
-                    st.code(cleaned, language="text")
-            else:
-                # Render the diagram
-                div_id = f"mermaid-div-{uuid.uuid4().hex[:8]}"
-                escaped = json.dumps(cleaned)   # safe JS string escaping
-
-                html = MERMAID_HTML_TEMPLATE.format(
-                    div_id=div_id,
-                    escaped_code=escaped,
-                )
-                # height auto-sizes; 400 is a safe default for most diagrams
-                components.html(html, height=400, scrolling=False)
-
-                # Also show code in expander for copy/debug
-                with st.expander("View diagram code", expanded=False):
-                    st.code(cleaned, language="text")
-
-        else:
-            # Regular Markdown text — render as normal
-            st.markdown(part)
 
 
 def render_confidence_badge(confidence: dict) -> None:
@@ -650,7 +580,7 @@ def generate_markdown_export(
         )
 
     if overview:
-        md += f"## 📄 Document Overview\n\n{overview}\n\n---\n\n"
+        md += f"{overview}\n\n---\n\n"
 
     if suggestions:
         md += "## 💡 AI-Generated Suggestions\n\n"
@@ -728,7 +658,7 @@ hr { border: none; border-top: 1px solid #313147; margin: 24px 0; }
 
     if overview:
         html += (
-            f"<h2>📄 Document Overview</h2><div class='msg'>{overview}</div>"
+            f"<div class='msg'>{overview}</div>"
         )
 
     html += "<h2>💬 Research Session</h2>"
@@ -789,7 +719,6 @@ def generate_docx_export(history, overview="", suggestions=None, stats=None):
         doc.add_paragraph()
 
     if overview:
-        doc.add_heading("Document Overview", level=1)
         for line in overview.split("\n"):
             line = line.strip()
             if not line:
@@ -1375,6 +1304,9 @@ else:
                         use_container_width=True,
                     )
 
+        render_voice_controller()
+
+        # --- CHAT INPUT & PROCESSING (Placed at the bottom) ---
         user_q = st.chat_input(
             "Ask about your documents, request suggestions, or propose research add-ons...",
             max_chars=MAX_CHAT_INPUT_LENGTH
@@ -1402,8 +1334,8 @@ else:
                 final_data = {}
                 confidence_result = None  # Store confidence for user message
                 
-                # Use a container for streaming to reduce re-renders
-                response_container = st.container()
+                # Use an empty slot for streaming to allow overwriting content
+                response_container = st.empty()
                 streamed_text = ""
 
                 # Pass IEEE metadata to the engine
@@ -1426,9 +1358,8 @@ else:
                         confidence_result = event.get("confidence")
                     elif event["type"] == "token":
                         streamed_text += event["token"]
-                        # Update the container instead of using empty() to reduce re-renders
-                        with response_container:
-                            st.markdown(streamed_text + "▌")
+                        # Overwrite the empty slot with the current text
+                        response_container.markdown(streamed_text + "▌")
                     elif event["type"] == "done":
                         final_data = event
 
@@ -1509,5 +1440,3 @@ else:
             # Render confidence badge below user question
             if confidence_result:
                 render_confidence_badge(confidence_result)
-            
-            st.rerun()

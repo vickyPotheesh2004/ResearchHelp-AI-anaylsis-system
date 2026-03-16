@@ -94,12 +94,121 @@ class MermaidCleaner:
         # Step 8 — Fix subgraph syntax
         code = MermaidCleaner._fix_subgraphs(code)
 
-        # Step 9 — Ensure diagram ends with a newline
+        # Step 9 — Force Hierarchical Tree (No mindmaps/circles allowed)
+        code = MermaidCleaner._enforce_tree_hierarchy(code)
+
+        # Step 9.5 — Fix triple quotes and other label nesting
+        code = MermaidCleaner._fix_nested_labels(code)
+
+        # Step 10 — Normalize whitespace
+        code = MermaidCleaner._normalize_whitespace(code)
+
+        # Step 11 — Ensure diagram ends with a newline
         code = code.rstrip() + "\n"
 
         return code
 
     # ── Private cleaners ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def _normalize_whitespace(code: str) -> str:
+        """Removes excessive spaces while preserving indentation."""
+        lines = code.split("\n")
+        fixed = []
+        for line in lines:
+            indent = len(line) - len(line.lstrip())
+            content = " ".join(line.split())
+            if not content:
+                fixed.append("")
+                continue
+            fixed.append(" " * indent + content)
+        return "\n".join(fixed)
+
+    @staticmethod
+    def _fix_nested_labels(code: str) -> str:
+        """Fixes labels like [""Text""] or ["'Text'"] which break the parser."""
+        # Fix triple quotes
+        code = code.replace('"""', '"').replace("'''", "'")
+        # Fix double quotes at edges inside brackets
+        code = re.sub(r'(\[|\(|\{)""', r'\1"', code)
+        code = re.sub(r'""(\]|\)|\})', r'"\1', code)
+        return code
+
+    @staticmethod
+    def _enforce_tree_hierarchy(code: str) -> str:
+        """
+        Converts indented lists or mindmap syntax into a valid 
+        Top-Down (TD) flowchart with explicit arrows.
+        Bails out if the code already looks like a valid graph/flowchart.
+        """
+        stripped_code = code.strip()
+        
+        # If it already has arrows, it's a handcrafted diagram.
+        # Don't try to re-parse it as a list, as that will destroy the labels.
+        if "-->" in stripped_code or "---" in stripped_code or "==>" in stripped_code:
+            # Just ensure it's TD (handled by _fix_diagram_type mostly, but be safe)
+            return code
+            
+        lines = code.split("\n")
+        if not lines: return code
+        
+        is_mindmap = False
+        fixed_lines = ["flowchart TD"]
+        stack = []  # To track (indent, node_id)
+        
+        # Check if the first non-empty line is 'mindmap'
+        for line in lines:
+            trimmed = line.strip()
+            if not trimmed or trimmed.startswith("%%"): continue
+            if trimmed.lower().startswith("mindmap"):
+                is_mindmap = True
+            break
+
+        for line in lines:
+            trimmed = line.strip()
+            if not trimmed or trimmed.startswith("%%"):
+                continue
+                
+            stripped_lower = trimmed.lower()
+            # Skip headers during conversion
+            if any(stripped_lower.startswith(t) for t in ["flowchart", "graph", "mindmap"]):
+                continue
+            
+            # If we don't see an arrow --> but we see indentation, it's a tree-as-list
+            indent = len(line) - len(line.lstrip())
+            
+            # Clean up the content (remove bullet points, quotes, brackets etc.)
+            content = trimmed.lstrip("-*•+").strip()
+            
+            # Remove node shape symbols common in mindmaps
+            content = re.sub(r'[\(\[\{\}\]\)]+', '', content).strip()
+            
+            # AGGRESSIVE STRIP: Remove all internal quotes and colons that break labels
+            content = content.replace('"', '').replace("'", '').replace(":", " - ").replace("<", " ").replace(">", " ").strip()
+            
+            if not content: continue
+
+            # Generate a stable ID for the node
+            node_id_seed = re.sub(r'\W+', '', content)[:20]
+            node_id = f"node_{node_id_seed}_{str(hash(content))[-4:]}"
+            
+            # Find parent in stack
+            while stack and stack[-1][0] >= indent:
+                stack.pop()
+            
+            if stack:
+                parent_id = stack[-1][1]
+                fixed_lines.append(f'    {parent_id} --> {node_id}["{content}"]')
+            else:
+                fixed_lines.append(f'    {node_id}["{content}"]')
+                
+            stack.append((indent, node_id))
+                
+        # Only return the converted version if we actually found something to convert
+        if len(fixed_lines) > 1:
+            return "\n".join(fixed_lines)
+        return code
+
 
     @staticmethod
     def _strip_fences(code: str) -> str:
@@ -114,11 +223,7 @@ class MermaidCleaner:
     def _fix_diagram_type(code: str) -> str:
         """
         Ensures the first non-empty line is a valid Mermaid diagram type.
-        Fixes common LLM mistakes:
-          - 'flowChart' → 'flowchart'
-          - 'sequence'  → 'sequenceDiagram'
-          - 'graph TB\n' missing space → kept as-is (already valid)
-          - 'graph' alone → 'graph TD' (add default direction)
+        Forces flowchart TD or graph TD to ensure tree structure.
         """
         lines = code.split("\n")
         for i, line in enumerate(lines):
@@ -128,11 +233,20 @@ class MermaidCleaner:
 
             first_word = stripped.split()[0].lower()
 
-            # Fix case variations
+            # Fix orientation: Force all graphs/flowcharts to TD (Top-Down)
+            if first_word in ["graph", "flowchart"]:
+                # Force TD for tree structure
+                if any(x in stripped for x in [" LR", " RL", " BT", " TB"]):
+                    lines[i] = re.sub(r"\s(LR|RL|BT|TB)", " TD", stripped, flags=re.IGNORECASE)
+                elif stripped == "graph" or stripped == "flowchart":
+                    lines[i] = stripped + " TD"
+                
+                # Ensure lowercase keywords
+                lines[i] = lines[i].replace("graph", "graph").replace("flowChart", "flowchart").replace("Flowchart", "flowchart")
+                break
+
+            # Fix case variations for other types
             case_fixes = {
-                "flowchart": "flowchart",
-                "flowChart": "flowchart",
-                "Flowchart": "flowchart",
                 "sequence": "sequenceDiagram",
                 "sequencediagram": "sequenceDiagram",
                 "classdiagram": "classDiagram",
@@ -146,20 +260,12 @@ class MermaidCleaner:
             for wrong, correct in case_fixes.items():
                 if first_word == wrong.lower() and stripped.lower().startswith(wrong.lower()):
                     lines[i] = line.replace(stripped.split()[0], correct, 1)
-                    stripped = lines[i].strip()
                     break
-
-            # "graph" alone without direction → add TD
-            if stripped == "graph":
-                lines[i] = line.replace("graph", "graph TD", 1)
-
-            # "flowchart" alone without direction → add TD
-            if stripped == "flowchart":
-                lines[i] = line.replace("flowchart", "flowchart TD", 1)
 
             break  # only process first non-empty line
 
-        return "\n".join(lines)
+        result = "\n".join(lines)
+        return result
 
     @staticmethod
     def _fix_node_labels(code: str) -> str:
@@ -186,37 +292,46 @@ class MermaidCleaner:
             # Replace colons (breaks Mermaid sequence diagrams outside of ->:)
             content = content.replace(":", " —")
 
-            # Replace raw double quotes → remove (Mermaid uses quotes for classDef)
+            # Replace raw double quotes → remove (We add our own quotes for safety)
             content = content.replace('"', "")
             content = content.replace("'", "")
 
-            # Remove angle brackets that aren't part of arrows
-            content = re.sub(r"<(?!br)(?!/br)([^>]{0,30})>", r"\1", content)
-
             # Decode common HTML entities
-            content = content.replace("&", "&")
+            content = content.replace("&amp;", "&")
             content = content.replace("<", "less than")
             content = content.replace(">", "greater than")
             content = content.replace("&nbsp;", " ")
 
-            return f"{open_bracket}{content}{close_bracket}"
+            return f'{open_bracket}"{content}"{close_bracket}'
 
-        # Match content inside [], (), {} node labels
-        code = re.sub(
-            r"(\[)([^\[\]]*?)(\])",
-            fix_label_content,
-            code
-        )
-        code = re.sub(
-            r"(\()([^()]*?)(\))",
-            fix_label_content,
-            code
-        )
-        code = re.sub(
-            r"(\{)([^{}]*?)(\})",
-            fix_label_content,
-            code
-        )
+        # Single pass for any bracket type to avoid nested replacements
+        # This handles mindmap root((Text)) and flowchart A["Text"]
+        # Pattern: matches [[...]] or ((...)) or {{...}} and everything in between
+        pattern = r"(\[+)(.*?)(\]+)|(\(+)(.*?)(\)+)|(\{+)(.*?)(\}+)"
+
+        def complex_fix(match):
+            # Check which group matched
+            for i in (1, 4, 7):
+                if match.group(i):
+                    open_b = match.group(i)
+                    content = match.group(i+1)
+                    close_b = match.group(i+2)
+                    
+                    # Ensure start/end brackets match counts roughly
+                    if len(open_b) != len(close_b):
+                        # If mismatched, just return original to let validator catch/fix
+                        return match.group(0)
+
+                    # Fix label content
+                    processed = content.replace('"', "").replace("'", "")
+                    processed = processed.replace(":", " —")
+                    processed = processed.replace("&amp;", "&").replace("<", "less than").replace(">", "greater than")
+                    processed = processed.strip()
+                    
+                    return f'{open_b}"{processed}"{close_b}'
+            return match.group(0)
+
+        code = re.sub(pattern, complex_fix, code)
 
         return code
 
@@ -300,6 +415,39 @@ class MermaidCleaner:
         for _ in range(open_subgraphs):
             fixed.append("end")
 
+
+        return "\n".join(fixed)
+
+    @staticmethod
+    def _fix_mindmap_arrows(code: str) -> str:
+        """
+        Removes flowchart-style arrows from Mindmaps.
+        Mindmaps use indentation/hierarchy only.
+        """
+        lines = code.split("\n")
+        if not lines:
+            return code
+            
+        # Check if it's a mindmap (skip comments)
+        is_mindmap = False
+        for line in lines:
+            stripped = line.strip().lower()
+            if not stripped or stripped.startswith("%%"):
+                continue
+            if "mindmap" in stripped:
+                is_mindmap = True
+            break
+            
+        if not is_mindmap:
+            return code
+            
+        fixed = []
+        for line in lines:
+            # Replace -->, ->, ==>, =>, -.- with a space
+            # but ONLY if not inside quotes (heuristic)
+            if '"' not in line:
+                line = re.sub(r"([-~=.]+>\s*|--\s*)", " ", line)
+            fixed.append(line)
         return "\n".join(fixed)
 
 
@@ -344,9 +492,10 @@ class MermaidValidator:
             for open_b, close_b in bracket_pairs:
                 opens = line.count(open_b)
                 closes = line.count(close_b)
-                if abs(opens - closes) > 1:
+                if opens != closes:
                     return False, (
-                        f"Unmatched '{open_b}' bracket on line: {line.strip()[:60]}"
+                        f"Unbalanced '{open_b}' and '{close_b}' brackets. "
+                        f"Check line: {line.strip()[:60]}"
                     )
 
         # flowchart / graph must have a direction
@@ -400,18 +549,102 @@ def extract_mermaid_blocks(text: str) -> list[str]:
     return blocks
 
 
-# ════════════════════════════════════════════════════════════════════════════
-#
-#  PART 2 — MERMAID RENDERING WITH FIXED ASYNC API
-#
-# ════════════════════════════════════════════════════════════════════════════
 
-# Updated MERMAID_HTML_TEMPLATE using async/await for Mermaid v10+
 MERMAID_HTML_TEMPLATE = """
-<div id="{div_id}" style="width:100%;min-height:300px;display:flex;align-items:center;justify-content:center;background:#f8f9fa;border-radius:8px;">
-    <div id="{div_id}-loading" style="color:#6c757d;">Loading diagram...</div>
+<div id="{div_id}-wrapper" class="mermaid-container-wrapper" style="width:100%; height:600px; position:relative; background:#ffffff; border-radius:12px; border:1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); margin: 20px 0; overflow: hidden; display: flex; flex-direction: column;">
+    
+    <!-- Header/Toolbar -->
+    <div style="padding: 10px 15px; border-bottom: 1px solid #f1f5f9; background: #fff; display: flex; justify-content: space-between; align-items: center; min-height: 50px;">
+        <div style="color: #64748b; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+            Research Tree View (Scroll to explore)
+        </div>
+        <div style="display: flex; gap: 8px;">
+             <!-- Download Button -->
+            <button onclick="downloadSvg('{div_id}')" 
+                    class="mermaid-download-btn"
+                    style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding: 6px 12px; font-size: 12px; display:flex; align-items:center; gap: 6px; cursor:pointer; color: #475569; transition: all 0.2s ease;"
+                    title="Download SVG">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                Download
+            </button>
+        </div>
+    </div>
+
+    <!-- Canvas -->
+    <div id="{div_id}" class="mermaid-canvas" style="flex: 1; width:100%; overflow:auto; background: #ffffff; padding: 20px;">
+        <div id="{div_id}-loading" style="color:#64748b; font-family: Inter, sans-serif; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 10px; height: 100%;">
+            <div style="width: 18px; height: 18px; border: 2px solid #e2e8f0; border-top-color: #3b82f6; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+            <span>Building Tree Structure...</span>
+        </div>
+    </div>
+    
+    <style>
+        @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
+        /* Custom Scrollbars */
+        .mermaid-canvas::-webkit-scrollbar {{ width: 12px; height: 12px; }}
+        .mermaid-canvas::-webkit-scrollbar-track {{ background: #f8fafc; }}
+        .mermaid-canvas::-webkit-scrollbar-thumb {{ background: #cbd5e1; border-radius: 10px; border: 3px solid #f8fafc; }}
+        .mermaid-canvas::-webkit-scrollbar-thumb:hover {{ background: #94a3b8; }}
+        
+        /* The Secret Sauce: No constraints on SVG */
+        .mermaid-canvas svg {{
+            display: block;
+            max-width: none !important;
+            height: auto !important;
+            /* Allow individual nodes to be clickable/hoverable */
+            pointer-events: auto;
+        }}
+        
+        .mermaid-download-btn:hover {{
+            background: #f1f5f9;
+            border-color: #cbd5e1;
+            color: #1e293b;
+        }}
+    </style>
 </div>
+
 <script>
+window.downloadSvg = function(divId) {{
+    const container = document.getElementById(divId);
+    if (!container) return;
+    
+    const svg = container.querySelector('svg');
+    if (!svg) {{
+        console.error("MermaidHelp: SVG not found for download");
+        return;
+    }}
+    
+    try {{
+        // Create a copy to avoid modifying the UI version
+        const svgClone = svg.cloneNode(true);
+        svgClone.setAttribute('style', 'background-color: white; padding: 20px;');
+        
+        // Ensure XMLNS is present for standalone files
+        if (!svgClone.getAttribute('xmlns')) {{
+            svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        }}
+        
+        const svgData = new XMLSerializer().serializeToString(svgClone);
+        const svgBlob = new Blob([svgData], {{type: 'image/svg+xml;charset=utf-8'}});
+        const url = URL.createObjectURL(svgBlob);
+        
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'DocMind-Analysis-Tree-' + new Date().getTime() + '.svg';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    }} catch (e) {{
+        console.error("MermaidHelp: Download failed", e);
+    }}
+}};
+
 (function() {{
     var code = {escaped_code};
     var divId = "{div_id}";
@@ -432,19 +665,27 @@ MERMAID_HTML_TEMPLATE = """
             // Initialize mermaid
             mermaid.initialize({{
                 startOnLoad: false,
-                theme: "default",
+                theme: "neutral",
                 themeVariables: {{
                     fontSize: "14px",
-                    fontFamily: "sans-serif",
+                    fontFamily: "Inter, sans-serif",
+                    primaryColor: "#ffffff",
+                    edgeColor: "#585858",
+                    lineColor: "#585858",
+                    textColor: "#333333",
+                    mainBkg: "#ffffff",
+                    nodeBorder: "#302b63",
+                    clusterBkg: "#f8f9fa",
                 }},
-                flowchart: {{ useMaxWidth: true, htmlLabels: true, curve: "basis" }},
-                sequence:  {{ useMaxWidth: true }},
-                gantt:     {{ useMaxWidth: true }},
+                flowchart: {{ useMaxWidth: false, htmlLabels: true, curve: "basis" }},
+                mindmap: {{ useMaxWidth: false, htmlLabels: true }},
+                sequence:  {{ useMaxWidth: false }},
+                gantt:     {{ useMaxWidth: false }},
                 securityLevel: "loose",
             }});
             
             // Generate unique ID for this diagram
-            var id = "mermaid-" + Math.random().toString(36).substr(2,9);
+            var id = "mermaid-svg-" + Math.random().toString(36).substr(2,9);
             
             // Use async render for Mermaid v10+
             var result = await mermaid.render(id, code);
@@ -453,11 +694,18 @@ MERMAID_HTML_TEMPLATE = """
             var container = document.getElementById(divId);
             container.innerHTML = result.svg;
             
-            // Make SVG responsive
+            // CRITICAL: Remove the inline max-width that Mermaid injects
             var svg = container.querySelector('svg');
             if (svg) {{
-                svg.style.maxWidth = "100%";
-                svg.style.height = "auto";
+                svg.removeAttribute('style');
+                svg.style.maxWidth = 'none';
+                svg.style.height = 'auto';
+                
+                // If it's a wide tree, ensure it takes up its needed space
+                var box = svg.viewBox.baseVal;
+                if (box && box.width > 0) {{
+                     svg.style.width = box.width + 'px';
+                }}
             }}
         }} catch(e) {{
             document.getElementById(divId).innerHTML =
@@ -465,7 +713,7 @@ MERMAID_HTML_TEMPLATE = """
                 + '<strong>Mermaid Render Error:</strong><br>'
                 + e.message
                 + '<br><br><strong>Diagram code:</strong><pre style="background:#f5f5f5;padding:10px;overflow-x:auto;">'
-                + code.replace(/</g,"<")
+                + code.replace(/</g,"&lt;")
                 + '</pre></div>';
         }}
     }}
@@ -541,8 +789,8 @@ def render_content_with_mermaid(content: str) -> None:
                     div_id=div_id,
                     escaped_code=escaped,
                 )
-                # height auto-sizes; 400 is a safe default for most diagrams
-                components.html(html, height=450, scrolling=False)
+                # height auto-sizes; 1200 is better for very large wide diagrams
+                components.html(html, height=1200, scrolling=True)
 
                 # Also show code in expander for copy/debug
                 with st.expander("View diagram code", expanded=False):
