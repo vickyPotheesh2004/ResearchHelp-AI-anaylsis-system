@@ -153,16 +153,15 @@ class IntentClassifier:
             "Classify the user's query into the most appropriate category.\n\n"
             "Categories:\n"
             "document_qa: Specific questions about the document content. "
-            "CRITICAL: Only choose this if the query is DIRECTLY related to the provided document topics. "
             "suggestion_request: Asking for ways to improve or expand the document/project.\n"
             "research_analysis: Deep analysis on specialized research domains.\n"
             "ieee_paper_gen: Generate a full IEEE-style research paper.\n"
             "research_addon: Proposing new features or technical additions.\n"
-            "off_topic: Queries unrelated to the specific document content. "
-            "Examples: Greeting, jokes, world news, or general industry questions (e.g., asking about AI history if the doc is only about a specific drone controller).\n\n"
-            f"Available Document Topics: {', '.join(available_topics[:20]) if available_topics else 'None listed'}\n\n"
-            "If the query is NOT about the specific topics listed above, you MUST return 'off_topic'.\n"
-            "Reply ONLY with the category name (e.g., 'document_qa' or 'off_topic')."
+            "off_topic: Queries completely unrelated to research, projects, or any academic/technical discussion. "
+            "Examples: Personal jokes, current weather, pop culture trivia, random chatter.\n\n"
+            f"Available Document Topics: {', '.join(available_topics[:30]) if available_topics else 'None listed'}\n\n"
+            "If the query is technically related or could be a general research question, prioritize 'document_qa' or 'research_analysis'.\n"
+            "Reply ONLY with the category name (e.g., 'document_qa', 'research_analysis', or 'off_topic')."
         )
 
         try:
@@ -191,8 +190,8 @@ class IntentClassifier:
                         result = {"intent": key, **INTENT_LABELS[key]}
                         break
                 else:
-                    # Default to off_topic if ambiguous/hallucinated
-                    result = {"intent": "off_topic", **INTENT_LABELS["off_topic"]}
+                    # Default to document_qa if ambiguous/hallucinated (safer than off_topic)
+                    result = {"intent": "document_qa", **INTENT_LABELS["document_qa"]}
 
             with _cache_lock:
                 self._cache[cache_key] = result
@@ -200,7 +199,7 @@ class IntentClassifier:
 
         except Exception as e:
             logger.error(f"Intent classification LLM call failed: {e}")
-            result = {"intent": "off_topic", **INTENT_LABELS["off_topic"]} # Safer default
+            result = {"intent": "document_qa", **INTENT_LABELS["document_qa"]} # Default to document_qa on failure
             with _cache_lock:
                 self._cache[cache_key] = result
             return result

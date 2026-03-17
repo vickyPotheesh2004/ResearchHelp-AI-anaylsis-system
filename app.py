@@ -123,8 +123,14 @@ def render_voice_controller():
             var recognition = null;
             var isRecording = false;
             
+            // Debug logging
+            console.log("Voice controller: Starting initialization...");
+            
             const WinParent = window.parent;
+            console.log("Voice controller: WinParent =", WinParent ? "available" : "null");
+            
             if (WinParent && (WinParent.webkitSpeechRecognition || WinParent.SpeechRecognition)) {{
+                console.log("Voice controller: Speech Recognition API available");
                 const SpeechRecognition = WinParent.SpeechRecognition || WinParent.webkitSpeechRecognition;
                 recognition = new SpeechRecognition();
                 recognition.continuous = false;
@@ -137,16 +143,23 @@ def render_voice_controller():
                 recognition.onresult = function(event) {{
                     injectToChat(event.results[0][0].transcript);
                 }};
+            }} else {{
+                console.log("Voice controller: Speech Recognition API NOT available in this browser");
             }}
             
             function updateBtnUI(recording) {{
-                WinParent.document.querySelectorAll('.voice-btn-mic').forEach(btn => {{
-                    if(recording) btn.classList.add('recording');
-                    else btn.classList.remove('recording');
-                }});
+                if (!WinParent) return;
+                var btns = WinParent.document.querySelectorAll('.voice-btn-mic');
+                if (btns.length > 0) {{
+                    btns.forEach(function(btn) {{
+                        if(recording) btn.classList.add('recording');
+                        else btn.classList.remove('recording');
+                    }});
+                }}
             }}
             
             function injectToChat(text) {{
+                if (!WinParent) return;
                 const ta = WinParent.document.querySelector('textarea[data-testid="stChatInputTextArea"]');
                 if (ta) {{
                     const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
@@ -167,13 +180,33 @@ def render_voice_controller():
             }}
 
             function injectButtons() {{
-                // Target the chat bar or its parent container
-                const chatBar = WinParent.document.querySelector('[data-testid="stChatInput"]');
-                if (!chatBar) return;
+                if (!WinParent) {{
+                    console.log("Voice controller: No parent window, skipping injection");
+                    return;
+                }}
+                
+                // Target the chat bar - try multiple selectors for compatibility
+                let chatBar = WinParent.document.querySelector('[data-testid="stChatInput"] div[role="presentation"]');
+                if (!chatBar) {{
+                    chatBar = WinParent.document.querySelector('.stChatInput');
+                }}
+                if (!chatBar) {{
+                    chatBar = WinParent.document.querySelector('[data-testid="stChatInput"]');
+                }}
+                if (!chatBar) {{
+                    // Try even more selectors for newer Streamlit versions
+                    chatBar = WinParent.document.querySelector('.stTextInput');
+                }}
+                if (!chatBar) {{
+                    console.log("Voice controller: Chat input not found, selectors tried");
+                    return;
+                }}
 
-                // Check if the button is MISSING from this specific chatBar instance
+                console.log("Voice controller: Chat bar found, checking for mic button...");
+
+                // Check if the button is MISSING
                 if (!chatBar.querySelector('.voice-btn-mic')) {{
-                    console.log("ResearchHelp-AI-anaylsis-system: Injecting self-healing mic...");
+                    console.log("Voice controller: Injecting mic button...");
                     
                     const container = WinParent.document.createElement('div');
                     container.className = 'voice-btn-container';
@@ -181,24 +214,27 @@ def render_voice_controller():
                     const micBtn = WinParent.document.createElement('div');
                     micBtn.className = 'voice-btn voice-btn-mic';
                     micBtn.innerHTML = '🎙️';
-                    micBtn.onclick = toggleMic;
+                    micBtn.title = "Voice Input - Click to speak";
+                    micBtn.onclick = function(e) {{ e.stopPropagation(); toggleMic(); }};
                     
                     container.appendChild(micBtn);
-                    chatBar.appendChild(container);
+                    
+                    // Try to prepend to the chat bar (so it shows up on the left)
+                    if (chatBar.firstChild) {{
+                        chatBar.insertBefore(container, chatBar.firstChild);
+                    }} else {{
+                        chatBar.appendChild(container);
+                    }}
+                    console.log("Voice controller: Mic button injected successfully!");
                 }}
             }}
             
-            // Lower-frequency polling (Every 1000ms) to reduce conflicts with scrolling
-            // Only inject if mic button is missing and avoid interfering with user interactions
-            if (WinParent && !WinParent.docmindMicInterval) {{
+            // Start the injection process
+            console.log("Voice controller: Setting up interval...");
+            if (!WinParent.docmindMicInterval) {{
                 WinParent.docmindMicInterval = setInterval(injectButtons, 1000);
-                injectButtons();
-                console.log("ResearchHelp-AI-anaylsis-system: Voice controller self-healing active.");
-            }}
-            // Stop polling once button is injected to save resources
-            if (WinParent && WinParent.document.querySelector('.voice-btn-mic')) {{
-                clearInterval(WinParent.docmindMicInterval);
-                WinParent.docmindMicInterval = null;
+                // Try immediately and then every second
+                setTimeout(injectButtons, 500);
             }}
         </script>
     </div>
@@ -264,7 +300,7 @@ def speak_text(text, key):
 
 
 st.set_page_config(
-    page_title="AI Document Q&A System",
+    page_title="AI Powered Document Q&A System",
     page_icon="🔬",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -328,33 +364,50 @@ div[data-testid="stMarkdownContainer"] {
 }
 
 /* Voice Interaction UI */
-[data-testid="stChatInput"] {
-    position: relative;
-    padding-right: 100px !important;
+/* Target chat input in various Streamlit versions */
+[data-testid="stChatInput"],
+[data-testid="stChatInput"] > div,
+.stChatInput,
+.stChatInput > div,
+.stChatInputContainer,
+.stChatInputContainer > div,
+section[data-testid="stChatInput"],
+div[data-testid="stChatInput"] {
+    position: relative !important;
+    padding-right: 120px !important;
+}
+
+/* Target the input element itself */
+div[data-testid="stChatInput"] input,
+.stChatInput input,
+.stTextInput input {
+    padding-right: 80px !important;
 }
 
 .voice-btn-container {
     position: absolute;
-    right: 12px;
-    bottom: 12px;
+    right: 60px;
+    bottom: 10px;
     display: flex;
     gap: 8px;
-    z-index: 1000;
+    z-index: 9999999;
+    pointer-events: auto;
 }
 
 .voice-btn {
-    width: 36px;
-    height: 36px;
+    width: 38px;
+    height: 38px;
     border-radius: 50%;
-    background: linear-gradient(135deg, #1e3c72, #2a5298);
+    background: linear-gradient(135deg, #302b63, #24243e);
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    border: 1px solid #4a45a0;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    font-size: 1.1rem;
+    font-size: 1.2rem;
+    user-select: none;
 }
 
 .voice-btn:hover {
@@ -530,7 +583,7 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 st.markdown(
     """
 <div class="main-header">
-    <h1>🔬 ResearchHelp-AI-anaylsis-system: AI Document Q&A System</h1>
+    <h1>🔬 AI Powered Document Q&A System</h1>
     <p>Upload documents • Ask questions • Get research insights • Download analysis</p>
 </div>
 """,
@@ -566,7 +619,7 @@ def generate_markdown_export(
     history, overview="", suggestions=None, stats=None
 ):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    md = "# 🔬 ResearchHelp-AI-anaylsis-system: AI Document Q&A System Report\n\n"
+    md = "# 🔬 AI Powered Document Q&A System Report\n\n"
     md += f"**Generated**: {timestamp}\n\n---\n\n"
 
     if stats:
@@ -622,7 +675,7 @@ def generate_markdown_export(
 def generate_html_export(history, overview="", suggestions=None, stats=None):
     html = """<!DOCTYPE html>
 <html><head><meta charset="utf-8">
-<title>ResearchHelp-AI-anaylsis-system: AI Document Q&A System Report</title>
+<title>AI Powered Document Q&A System Report</title>
 <style>
 body { font-family: 'Segoe UI', sans-serif; max-width: 900px; margin: 0 auto; padding: 40px; background: #0f0c29; color: #e0e0f0; }
 h1 { background: linear-gradient(90deg, #a8edea, #fed6e3); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-align: center; }
@@ -642,7 +695,7 @@ th { background: #1e1e2e; color: #a8edea; }
 hr { border: none; border-top: 1px solid #313147; margin: 24px 0; }
 </style></head><body>
 """
-    html += "<h1>🔬 ResearchHelp-AI-anaylsis-system: AI Document Q&A System Report</h1>"
+    html += "<h1>🔬 AI Powered Document Q&A System Report</h1>"
     html += f"<p style='text-align:center;color:#888;'>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p><hr>"
 
     if stats:
@@ -687,7 +740,7 @@ def generate_docx_export(history, overview="", suggestions=None, stats=None):
     font.color.rgb = RGBColor(0x33, 0x33, 0x33)
 
     title = doc.add_heading(
-        "ResearchHelp-AI-anaylsis-system: AI Document Q&A System Report",
+        "AI Powered Document Q&A System Report",
         level=0,
     )
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -1063,7 +1116,7 @@ with st.sidebar:
         st.markdown(
             """
         <div style="text-align: center; padding: 40px 20px;">
-            <h1 style="color: #a8edea; margin-bottom: 0;">ResearchHelp-AI-anaylsis-system AI</h1>
+            <h1 style="color: #a8edea; margin-bottom: 0;">AI Powered Document Q&A System</h1>
             <p style="color: #666;">Document Research & Voice Lab</p>
         </div>
         """,
@@ -1230,11 +1283,10 @@ else:
         tab_ieee = None
 
     # ─── Chat Interface ───
-    with (
-        tab_chat
-        if (st.session_state.doc_overview or st.session_state.auto_suggestions)
-        else st.container()
-    ):
+    # Always use a dedicated container for chat to ensure proper layout
+    chat_container = st.container()
+    
+    with chat_container:
         # Render existing history FIRST so input stays at the bottom
         for msg in st.session_state.chat_history:
             with st.chat_message(msg["role"]):
@@ -1250,7 +1302,14 @@ else:
                 if msg.get("reasoning_details") and msg["role"] == "assistant":
                     with st.expander("🧠 View Logic Trace"):
                         st.text(msg["reasoning_details"])
-                render_content_with_mermaid(msg["content"])
+                
+                # Only render Mermaid diagrams if NOT off_topic
+                msg_intent = msg.get("intent", {}).get("intent") if isinstance(msg.get("intent"), dict) else msg.get("intent")
+                if msg_intent != "off_topic":
+                    render_content_with_mermaid(msg["content"])
+                else:
+                    st.markdown(msg["content"])
+
                 if msg["role"] == "assistant":
                     speak_text(msg["content"], f"hist_{id(msg)}")
                 
@@ -1366,8 +1425,13 @@ else:
                 final_content = final_data.get("content", streamed_text)
                 # Clear the streaming placeholder
                 response_container.empty()
-                # Render final content
-                render_content_with_mermaid(final_content)
+                
+                # Render final content - Only if NOT off_topic
+                if stream_meta.get("intent", {}).get("intent") != "off_topic":
+                    render_content_with_mermaid(final_content)
+                else:
+                    st.markdown(final_content)
+                
                 speak_text(final_content, "stream_latest")
 
                 reasoning = final_data.get("reasoning")

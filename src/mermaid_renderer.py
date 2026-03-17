@@ -527,9 +527,9 @@ def extract_mermaid_blocks(text: str) -> list[str]:
     """
     blocks = []
 
-    # Pattern 1 — fenced blocks: ```mermaid ... ```
+    # Pattern 1 — fenced blocks: ```mermaid ... ``` - more flexible
     fenced = re.findall(
-        r"```(?:mermaid)?\s*\n(.*?)```",
+        r"```(?:mermaid)?\s*?\n?(.*?)```",
         text,
         flags=re.DOTALL | re.IGNORECASE,
     )
@@ -745,9 +745,10 @@ def render_content_with_mermaid(content: str) -> None:
     import streamlit.components.v1 as components
     import json
 
-    # Split content on ```mermaid ... ``` boundaries
-    # Produces alternating [text, mermaid_code, text, mermaid_code, ...] segments
-    parts = re.split(r"(```(?:mermaid)?\s*\n.*?```)", content, flags=re.DOTALL | re.IGNORECASE)
+    # Split content on ```mermaid ... ``` boundaries - more flexible pattern
+    # Matches both ```mermaid and ``` with optional content after
+    # More flexible: allows for whitespace and optional newline after opening fence
+    parts = re.split(r"(```(?:mermaid)?\s*?\n?.*?```)", content, flags=re.DOTALL | re.IGNORECASE)
 
     # Inject Mermaid CDN once per session
     if "mermaid_cdn_injected" not in st.session_state:
@@ -761,13 +762,13 @@ def render_content_with_mermaid(content: str) -> None:
         if not part:
             continue
 
-        # Detect if this segment is a mermaid block
-        is_mermaid = bool(re.match(r"^```(?:mermaid)?", part, re.IGNORECASE))
+        # Detect if this segment is a mermaid block - more flexible pattern
+        is_mermaid = bool(re.match(r"^```(?:mermaid)?\s*?\n?", part, re.IGNORECASE))
 
         if is_mermaid:
-            # Extract raw code (strip fences)
-            raw_code = re.sub(r"^```(?:mermaid)?\s*\n?", "", part, flags=re.IGNORECASE)
-            raw_code = re.sub(r"\n?```\s*$", "", raw_code)
+            # Extract raw code (strip fences) - more flexible pattern
+            raw_code = re.sub(r"^```(?:mermaid)?\s*?\n?", "", part, flags=re.IGNORECASE)
+            raw_code = re.sub(r"\n?```\s*$", "", raw_code, flags=re.IGNORECASE)
 
             # Clean the code
             cleaned = MermaidCleaner.clean(raw_code)
